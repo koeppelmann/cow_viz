@@ -2498,9 +2498,9 @@
         let knownOrderUids = new Set();
         let pendingOrderUids = []; // Orders waiting to be fetched
         let isFetching = false;
-        let currentBatchDelay = 100; // Start with 100ms, increase on rate limit
-        const MIN_BATCH_DELAY = 100;
-        const MAX_BATCH_DELAY = 2000;
+        let currentFetchDelay = 500; // Start with 500ms between individual requests
+        const MIN_FETCH_DELAY = 300;  // Minimum 300ms between requests
+        const MAX_FETCH_DELAY = 5000; // Max 5 seconds when rate limited
 
         // Fetch orders from the auction list
         async function fetchOrders() {
@@ -2545,69 +2545,77 @@
             }
         }
 
-        // Incrementally fetch order details and update visualization
+        // Incrementally fetch order details ONE AT A TIME with delays
         async function fetchOrdersIncrementally() {
             if (isFetching) return;
             isFetching = true;
 
             const network = document.getElementById('network').value;
             const apiNetwork = getApiNetwork(network);
-            const batchSize = 20; // Smaller batches for more responsive updates
 
-            while (pendingOrderUids.length > 0) {
-                const batch = pendingOrderUids.splice(0, batchSize);
-                const batchOrders = [];
-                let rateLimited = false;
+            // Process orders one at a time with delays to avoid rate limiting
+            let fetchedCount = 0;
+            const maxPerCycle = 50; // Maximum orders to fetch per cycle
 
-                // Fetch batch with individual error handling
-                await Promise.all(batch.map(async uid => {
-                    try {
-                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
+            while (pendingOrderUids.length > 0 && fetchedCount < maxPerCycle) {
+                const uid = pendingOrderUids.shift();
 
-                        if (orderRes.status === 429) {
-                            // Rate limited - put back in queue and slow down
-                            rateLimited = true;
-                            pendingOrderUids.unshift(uid);
-                            return;
-                        }
+                try {
+                    const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
 
-                        if (orderRes.ok) {
-                            const order = await orderRes.json();
-                            if (order && order.status === 'open') {
-                                batchOrders.push(order);
-                                knownOrderUids.add(order.uid);
+                    if (orderRes.status === 429) {
+                        // Rate limited - put back in queue and slow down significantly
+                        pendingOrderUids.unshift(uid);
+                        currentFetchDelay = Math.min(currentFetchDelay * 2, MAX_FETCH_DELAY);
+                        console.log(`[fetch] Rate limited! Slowing to ${currentFetchDelay}ms, ${pendingOrderUids.length} pending`);
+                        // Take a longer break when rate limited
+                        await new Promise(r => setTimeout(r, currentFetchDelay * 2));
+                        continue;
+                    }
+
+                    if (orderRes.ok) {
+                        const order = await orderRes.json();
+                        if (order && order.status === 'open') {
+                            knownOrderUids.add(order.uid);
+                            await processNewOrders([order]);
+                            fetchedCount++;
+
+                            // Update UI every 5 orders
+                            if (fetchedCount % 5 === 0) {
+                                updateStats();
+                                updateTokenList();
                             }
                         }
-                    } catch (e) {
-                        // Network error - put back in queue
-                        pendingOrderUids.push(uid);
                     }
-                }));
 
-                // Process this batch immediately so visualization updates
-                if (batchOrders.length > 0) {
-                    await processNewOrders(batchOrders);
-                    updateStats();
-                    updateTokenList();
-                    console.log(`[fetch] +${batchOrders.length} orders (${orders.size} total, ${pendingOrderUids.length} pending)`);
+                    // Gradually speed up if not rate limited
+                    currentFetchDelay = Math.max(currentFetchDelay * 0.95, MIN_FETCH_DELAY);
+
+                } catch (e) {
+                    // Network error - put back in queue
+                    pendingOrderUids.push(uid);
+                    console.error('[fetch] Network error:', e);
                 }
 
-                // Adjust delay based on rate limiting
-                if (rateLimited) {
-                    currentBatchDelay = Math.min(currentBatchDelay * 2, MAX_BATCH_DELAY);
-                    console.log(`[fetch] Rate limited, slowing to ${currentBatchDelay}ms`);
-                } else {
-                    currentBatchDelay = Math.max(currentBatchDelay * 0.9, MIN_BATCH_DELAY);
-                }
-
-                // Wait before next batch
+                // Wait between each request
                 if (pendingOrderUids.length > 0) {
-                    await new Promise(r => setTimeout(r, currentBatchDelay));
+                    await new Promise(r => setTimeout(r, currentFetchDelay));
                 }
             }
 
+            // Final UI update
+            if (fetchedCount > 0) {
+                updateStats();
+                updateTokenList();
+                console.log(`[fetch] +${fetchedCount} orders (${orders.size} total, ${pendingOrderUids.length} still pending)`);
+            }
+
             isFetching = false;
-            console.log(`[fetch] Done, ${orders.size} total orders`);
+
+            // If there are still pending orders, schedule another fetch cycle
+            if (pendingOrderUids.length > 0) {
+                setTimeout(fetchOrdersIncrementally, 1000);
+            }
         }
 
         function resetView() {
@@ -3237,7 +3245,7 @@
 
         resizeCanvas();
         fetchOrders();
-        setInterval(fetchOrders, 10000); // Reduced frequency to avoid disrupting physics
+        setInterval(fetchOrders, 30000); // Poll auction every 30 seconds to reduce API load
     </script>
 </body>
 </html>
