@@ -311,6 +311,24 @@
         .order-panel-title {
             font-size: 1.1rem;
             color: #00d4aa;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .price-flip-btn {
+            background: rgba(0, 212, 170, 0.2);
+            border: 1px solid #00d4aa;
+            color: #00d4aa;
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .price-flip-btn:hover {
+            background: rgba(0, 212, 170, 0.4);
         }
         .order-panel-close {
             background: none;
@@ -572,7 +590,10 @@
     <div id="order-panel-overlay" onclick="closeOrderPanel()"></div>
     <div id="order-panel">
         <div class="order-panel-header">
-            <span class="order-panel-title" id="order-panel-title">Orders</span>
+            <span class="order-panel-title">
+                <span id="order-panel-title">Orders</span>
+                <button class="price-flip-btn" onclick="flipPriceDisplay()" title="Flip price display">⇄ Flip</button>
+            </span>
             <button class="order-panel-close" onclick="closeOrderPanel()">&times;</button>
         </div>
         <div class="order-panel-summary" id="order-panel-summary"></div>
@@ -868,6 +889,12 @@
 
         // Layout mode: 'poles' (3 category clusters) or 'circle' (single circle)
         let layoutMode = 'poles';
+
+        // Order panel state for price flipping
+        let currentPanelEdge = null;
+        let currentPanelFlipped = false;
+        let currentPanelBaseToken = null;  // The "base" token (price is X per 1 base)
+        let currentPanelQuoteToken = null; // The "quote" token
 
         // Custom pole positions (can be dragged by user)
         let polePositions = null; // Will be initialized in resizeCanvas
@@ -2787,25 +2814,76 @@
             }
         }
 
+        // Determine smart default for price display
+        // Returns which token should be the "quote" (denominator) - price shown as "X quote per 1 base"
+        function getDefaultQuoteToken(token1, token2) {
+            const cat1 = getTokenCategory(token1);
+            const cat2 = getTokenCategory(token2);
+
+            // If one is stable, it should be the quote (e.g., "3000 USDC per ETH")
+            if (cat1 === 'stable' && cat2 !== 'stable') return token1;
+            if (cat2 === 'stable' && cat1 !== 'stable') return token2;
+
+            // If one is ETH and other is "other", ETH should be quote (e.g., "0.0003 ETH per TOKEN")
+            if (cat1 === 'eth' && cat2 === 'other') return token1;
+            if (cat2 === 'eth' && cat1 === 'other') return token2;
+
+            // Default: second token is quote
+            return token2;
+        }
+
         // Show order panel for an edge
         async function showOrderPanel(edge) {
+            // Store edge for flip functionality
+            currentPanelEdge = edge;
+
+            const sellInfo = await getTokenInfo(edge.sellToken);
+            const buyInfo = await getTokenInfo(edge.buyToken);
+
+            // Determine default quote token (the denominator in price display)
+            const defaultQuote = getDefaultQuoteToken(edge.sellToken, edge.buyToken);
+            currentPanelFlipped = (defaultQuote === edge.sellToken);
+            currentPanelBaseToken = currentPanelFlipped ? edge.buyToken : edge.sellToken;
+            currentPanelQuoteToken = currentPanelFlipped ? edge.sellToken : edge.buyToken;
+
+            await renderOrderPanel();
+        }
+
+        // Flip the price display
+        async function flipPriceDisplay() {
+            if (!currentPanelEdge) return;
+            currentPanelFlipped = !currentPanelFlipped;
+            // Swap base and quote
+            const temp = currentPanelBaseToken;
+            currentPanelBaseToken = currentPanelQuoteToken;
+            currentPanelQuoteToken = temp;
+            await renderOrderPanel();
+        }
+
+        // Render the order panel with current flip state
+        async function renderOrderPanel() {
+            const edge = currentPanelEdge;
+            if (!edge) return;
+
             const panel = document.getElementById('order-panel');
             const overlay = document.getElementById('order-panel-overlay');
             const titleEl = document.getElementById('order-panel-title');
             const summaryEl = document.getElementById('order-panel-summary');
             const listEl = document.getElementById('order-list');
 
+            const baseInfo = await getTokenInfo(currentPanelBaseToken);
+            const quoteInfo = await getTokenInfo(currentPanelQuoteToken);
             const sellInfo = await getTokenInfo(edge.sellToken);
             const buyInfo = await getTokenInfo(edge.buyToken);
 
             // Check for reverse edge (orders going the other direction)
             const reverseEdgeKey = `${edge.buyToken}-${edge.sellToken}`;
             const reverseEdge = edges.get(reverseEdgeKey);
-
             const hasReverseEdge = reverseEdge && reverseEdge.orders.length > 0;
 
+            // Update title with current price direction
             if (hasReverseEdge) {
-                titleEl.textContent = `${sellInfo.symbol} ↔ ${buyInfo.symbol}`;
+                titleEl.textContent = `${baseInfo.symbol} ↔ ${quoteInfo.symbol}`;
                 const totalOrders = edge.orders.length + reverseEdge.orders.length;
                 summaryEl.textContent = `${totalOrders} orders (${edge.orders.length} sell ${sellInfo.symbol}, ${reverseEdge.orders.length} sell ${buyInfo.symbol})`;
             } else {
@@ -2827,25 +2905,36 @@
                 const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
                 const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
 
-                // Price = buyAmount / sellAmount (how much buy token per sell token)
-                const price = buyAmount / sellAmount;
+                // Raw price = buyAmount / sellAmount (how much buy token per sell token)
+                const rawPrice = buyAmount / sellAmount;
+
+                // Adjust price based on flip state
+                // If flipped, we want quote/base instead of buy/sell
+                let displayPrice;
+                if (currentPanelFlipped) {
+                    // Original: sellToken -> buyToken, price = buyAmount/sellAmount
+                    // Flipped means we want sellAmount/buyAmount
+                    displayPrice = 1 / rawPrice;
+                } else {
+                    displayPrice = rawPrice;
+                }
 
                 return {
                     uid,
                     sellAmount,
                     buyAmount,
-                    price,
+                    rawPrice,
+                    displayPrice,
                     sellSymbol: sellInfo.symbol,
                     buySymbol: buyInfo.symbol,
                     explorerUrl: `${explorerBase}/orders/${uid}`
                 };
             }));
 
-            // Filter out nulls and sort by price (best price first = highest buy per sell)
+            // Filter out nulls
             const validOrders = orderDetails.filter(o => o !== null);
-            validOrders.sort((a, b) => b.price - a.price);
 
-            // Process reverse edge orders if they exist (these are "bids" from our perspective)
+            // Process reverse edge orders if they exist
             let reverseOrders = [];
             if (hasReverseEdge) {
                 const reverseOrderDetails = await Promise.all(reverseEdge.orders.map(async (uid) => {
@@ -2858,19 +2947,25 @@
                     const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
                     const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
 
-                    // For reverse orders: they're selling buyInfo.symbol for sellInfo.symbol
-                    // Price from our perspective = 1 / (buyAmount/sellAmount) = sellAmount/buyAmount
-                    const price = sellAmount / buyAmount;
+                    // For reverse orders in original terms: price = sellAmount/buyAmount
+                    const rawPrice = sellAmount / buyAmount;
+
+                    // Adjust for flip
+                    let displayPrice;
+                    if (currentPanelFlipped) {
+                        displayPrice = 1 / rawPrice;
+                    } else {
+                        displayPrice = rawPrice;
+                    }
 
                     return {
                         uid,
-                        sellAmount: buyAmount, // What they want (our base token)
-                        buyAmount: sellAmount, // What they're offering (our quote token)
-                        price, // Price in our terms (buyInfo.symbol per sellInfo.symbol)
+                        sellAmount,
+                        buyAmount,
+                        rawPrice,
+                        displayPrice,
                         sellSymbol: buyInfo.symbol,
                         buySymbol: sellInfo.symbol,
-                        originalSellSymbol: buyInfo.symbol,
-                        originalBuySymbol: sellInfo.symbol,
                         explorerUrl: `${explorerBase}/orders/${uid}`,
                         isBid: true
                     };
@@ -2878,12 +2973,13 @@
                 reverseOrders = reverseOrderDetails.filter(o => o !== null);
             }
 
-            // Combine all orders for the list, marking asks and bids
+            // Combine all orders for the list
             const allOrders = [
                 ...validOrders.map(o => ({ ...o, isBid: false })),
                 ...reverseOrders
             ];
-            allOrders.sort((a, b) => b.price - a.price);
+            // Sort by display price
+            allOrders.sort((a, b) => b.displayPrice - a.displayPrice);
 
             // Build the order list HTML
             listEl.innerHTML = allOrders.map(order => `
@@ -2893,22 +2989,24 @@
                         <span class="order-buy">Buy: ${formatAmount(order.isBid ? order.sellAmount : order.buyAmount)} ${order.isBid ? order.sellSymbol : order.buySymbol}</span>
                     </div>
                     <div class="order-price">
-                        ${formatPrice(order.price)}<br>
-                        <span style="font-size: 0.7rem; color: #888;">${buyInfo.symbol}/${sellInfo.symbol}</span>
+                        ${formatPrice(order.displayPrice)}<br>
+                        <span style="font-size: 0.7rem; color: #888;">${quoteInfo.symbol}/${baseInfo.symbol}</span>
                     </div>
                     <a href="${order.explorerUrl}" target="_blank" class="order-link">View ↗</a>
                 </div>
             `).join('');
 
-            // Reset to depth chart tab
-            switchTab('depth');
+            // Reset to depth chart tab only on initial open
+            if (!panel.classList.contains('visible')) {
+                switchTab('depth');
+            }
 
             panel.classList.add('visible');
             overlay.classList.add('visible');
 
             // Draw depth chart after panel is visible (need timeout for CSS to apply)
             setTimeout(() => {
-                drawDepthChart(validOrders, reverseOrders, sellInfo.symbol, buyInfo.symbol);
+                drawDepthChart(validOrders, reverseOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
             }, 50);
         }
 
@@ -2926,7 +3024,7 @@
             document.getElementById(`tab-${tabName}`).classList.add('active');
         }
 
-        function drawDepthChart(askOrders, bidOrders, sellSymbol, buySymbol) {
+        function drawDepthChart(askOrders, bidOrders, baseSymbol, quoteSymbol, isFlipped = false) {
             const depthCanvas = document.getElementById('depth-chart');
             const ctx = depthCanvas.getContext('2d');
             const container = document.getElementById('depth-chart-container');
@@ -2958,37 +3056,38 @@
                 return;
             }
 
-            // Sort asks by price (low to high) - these are sell orders
-            const sortedAsks = hasAsks ? [...askOrders].sort((a, b) => a.price - b.price) : [];
-            // Sort bids by price (high to low) - these are buy orders (reverse direction)
-            const sortedBids = hasBids ? [...bidOrders].sort((a, b) => b.price - a.price) : [];
+            // Use displayPrice for sorting and positioning
+            // Sort asks by displayPrice (low to high) - these are sell orders
+            const sortedAsks = hasAsks ? [...askOrders].sort((a, b) => a.displayPrice - b.displayPrice) : [];
+            // Sort bids by displayPrice (high to low) - these are buy orders (reverse direction)
+            const sortedBids = hasBids ? [...bidOrders].sort((a, b) => b.displayPrice - a.displayPrice) : [];
 
             // Calculate cumulative depth for asks (from lowest price upward)
             let cumulativeAsks = [];
             let askCumSum = 0;
             for (const order of sortedAsks) {
-                cumulativeAsks.push({ price: order.price, depth: askCumSum });
+                cumulativeAsks.push({ price: order.displayPrice, depth: askCumSum });
                 askCumSum += order.sellAmount;
             }
             if (sortedAsks.length > 0) {
-                cumulativeAsks.push({ price: sortedAsks[sortedAsks.length - 1].price, depth: askCumSum });
+                cumulativeAsks.push({ price: sortedAsks[sortedAsks.length - 1].displayPrice, depth: askCumSum });
             }
 
             // Calculate cumulative depth for bids (from highest price downward)
             let cumulativeBids = [];
             let bidCumSum = 0;
             for (const order of sortedBids) {
-                cumulativeBids.push({ price: order.price, depth: bidCumSum });
+                cumulativeBids.push({ price: order.displayPrice, depth: bidCumSum });
                 bidCumSum += order.sellAmount; // sellAmount here is what they're offering
             }
             if (sortedBids.length > 0) {
-                cumulativeBids.push({ price: sortedBids[sortedBids.length - 1].price, depth: bidCumSum });
+                cumulativeBids.push({ price: sortedBids[sortedBids.length - 1].displayPrice, depth: bidCumSum });
             }
 
             // Find price range across both sides
             const allPrices = [
-                ...sortedAsks.map(o => o.price),
-                ...sortedBids.map(o => o.price)
+                ...sortedAsks.map(o => o.displayPrice),
+                ...sortedBids.map(o => o.displayPrice)
             ];
             const minPrice = Math.min(...allPrices);
             const maxPrice = Math.max(...allPrices);
@@ -3150,7 +3249,7 @@
             ctx.fillStyle = '#aaa';
             ctx.font = '11px Segoe UI';
             ctx.textAlign = 'center';
-            ctx.fillText(`Price (${buySymbol} per ${sellSymbol})`, w / 2, h - 8);
+            ctx.fillText(`Price (${quoteSymbol} per ${baseSymbol})`, w / 2, h - 8);
 
             ctx.save();
             ctx.translate(15, h / 2);
