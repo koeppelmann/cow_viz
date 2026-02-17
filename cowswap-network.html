@@ -188,6 +188,55 @@
             height: 10px;
             border-radius: 50%;
         }
+        .filter-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+        }
+        .filter-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .filter-value {
+            color: #00d4aa;
+            font-weight: 600;
+        }
+        .filter-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: #333;
+            outline: none;
+            margin: 8px 0;
+        }
+        .filter-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d4aa;
+            cursor: pointer;
+        }
+        .filter-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d4aa;
+            cursor: pointer;
+            border: none;
+        }
+        .filter-stats {
+            font-size: 0.7rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        .filter-stats span {
+            color: #888;
+        }
         #info-panel {
             position: fixed;
             right: 20px;
@@ -497,6 +546,16 @@
             <div class="legend-category">
                 <div class="cat-dot" style="background: #f97316;"></div>
                 <span>Other Tokens</span>
+            </div>
+        </div>
+        <div class="filter-section">
+            <div class="filter-label">
+                <span>Min Orders per Token</span>
+                <span class="filter-value" id="filter-value">2</span>
+            </div>
+            <input type="range" class="filter-slider" id="min-orders-filter" min="1" max="20" value="2" oninput="updateMinOrdersFilter(this.value)">
+            <div class="filter-stats">
+                Showing <span id="filtered-tokens">0</span> of <span id="total-tokens">0</span> tokens
             </div>
         </div>
     </div>
@@ -1499,14 +1558,27 @@
             return 12 + (totalVolume / maxVolume) * 20;
         }
 
-        // Minimum number of orders for a token to be displayed
-        const MIN_ORDERS_TO_DISPLAY = 2;
+        // Minimum number of orders for a token to be displayed (adjustable via slider)
+        let minOrdersToDisplay = 2;
+
+        function updateMinOrdersFilter(value) {
+            minOrdersToDisplay = parseInt(value);
+            document.getElementById('filter-value').textContent = value;
+            // Recalculate positions and redraw
+            if (layoutMode === 'poles') {
+                updateTokenPositions();
+            } else {
+                arrangeInCircle();
+            }
+            updateStats();
+            draw();
+        }
 
         function updateTokenPositions() {
-            // Filter tokens: only show tokens with at least MIN_ORDERS_TO_DISPLAY orders
+            // Filter tokens: only show tokens with at least minOrdersToDisplay orders
             const tokenList = Array.from(tokens.keys()).filter(addr => {
                 const tokenData = tokens.get(addr);
-                return tokenData && tokenData.orders.length >= MIN_ORDERS_TO_DISPLAY;
+                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
             });
             const count = tokenList.length;
             if (count === 0) return;
@@ -1593,7 +1665,11 @@
         function physicsStep() {
             if (!physicsEnabled) return;
 
-            const positions = Array.from(tokenPositions.entries());
+            // Only process tokens that meet the minimum order filter
+            const positions = Array.from(tokenPositions.entries()).filter(([addr]) => {
+                const tokenData = tokens.get(addr);
+                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
+            });
             const poles = getCategoryPoles();
 
             positions.forEach(([addr, pos]) => {
@@ -1779,9 +1855,14 @@
         function updateStats() {
             document.getElementById('order-count').textContent = orders.size;
 
-            // Show filtered token count (tokens with >= MIN_ORDERS_TO_DISPLAY orders)
-            const displayedTokens = Array.from(tokens.values()).filter(t => t.orders.length >= MIN_ORDERS_TO_DISPLAY).length;
+            // Show filtered token count (tokens with >= minOrdersToDisplay orders)
+            const totalTokens = tokens.size;
+            const displayedTokens = Array.from(tokens.values()).filter(t => t.orders.length >= minOrdersToDisplay).length;
             document.getElementById('token-count').textContent = displayedTokens;
+
+            // Update filter stats
+            document.getElementById('filtered-tokens').textContent = displayedTokens;
+            document.getElementById('total-tokens').textContent = totalTokens;
 
             let totalVolume = 0;
             tokens.forEach(t => totalVolume += t.totalSellVolume);
@@ -1847,8 +1928,11 @@
             ctx.arc(centerX, centerY, radius * 0.85, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Draw category arc indicators
-            const tokenList = Array.from(tokens.keys());
+            // Draw category arc indicators - use filtered token list
+            const tokenList = Array.from(tokens.keys()).filter(addr => {
+                const tokenData = tokens.get(addr);
+                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
+            });
             const categoryTokens = { stable: [], eth: [], other: [] };
             tokenList.forEach(addr => {
                 const cat = getTokenCategory(addr);
@@ -1967,6 +2051,12 @@
             const maxVolume = Math.max(...Array.from(edges.values()).map(e => Math.max(e.sellVolume, e.buyVolume)), 1);
 
             edges.forEach((edge, key) => {
+                // Skip edges where either token doesn't meet minimum order filter
+                const sellTokenData = tokens.get(edge.sellToken);
+                const buyTokenData = tokens.get(edge.buyToken);
+                if (!sellTokenData || sellTokenData.orders.length < minOrdersToDisplay) return;
+                if (!buyTokenData || buyTokenData.orders.length < minOrdersToDisplay) return;
+
                 const fromPos = tokenPositions.get(edge.sellToken);
                 const toPos = tokenPositions.get(edge.buyToken);
                 if (!fromPos || !toPos) return;
@@ -2055,6 +2145,10 @@
 
         async function drawTokens() {
             for (const [address, pos] of tokenPositions) {
+                // Skip tokens that don't meet minimum order filter
+                const tokenData = tokens.get(address);
+                if (!tokenData || tokenData.orders.length < minOrdersToDisplay) continue;
+
                 const tokenInfo = await getTokenInfo(address);
                 const size = pos.size || 15;
 
@@ -2541,7 +2635,11 @@
         }
 
         function arrangeInCircle() {
-            const tokenList = Array.from(tokens.keys());
+            // Filter tokens: only show tokens with at least minOrdersToDisplay orders
+            const tokenList = Array.from(tokens.keys()).filter(addr => {
+                const tokenData = tokens.get(addr);
+                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
+            });
             const count = tokenList.length;
             if (count === 0) return;
 
