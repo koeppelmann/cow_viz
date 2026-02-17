@@ -15,7 +15,6 @@ Real-time visualizations for CoW Protocol order book and token network.
 - Color coding by order type (Market/Limit/TWAP), age, owner, or trading pair
 - Batch settlement layers showing historical batches
 - Audio feedback for new orders and settlements
-- Supports: Ethereum, Gnosis, Arbitrum, Base, BNB Chain
 
 ### 2D Token Network (`cowswap-network.html`)
 - Token nodes grouped by category (Stablecoins, ETH derivatives, Other)
@@ -23,18 +22,10 @@ Real-time visualizations for CoW Protocol order book and token network.
 - Draggable tokens and category poles
 - Click edges to see order list and depth chart
 - Toggle between poles layout and circle layout
-- Supports: Ethereum, Gnosis, Arbitrum, Base, BNB Chain
 
-## Enabling GitHub Pages
+## Supported Networks
 
-1. Go to your repository: https://github.com/koeppelmann/cow_viz
-2. Click **Settings** (top menu)
-3. Click **Pages** (left sidebar under "Code and automation")
-4. Under "Source", select **Deploy from a branch**
-5. Under "Branch", select **main** and **/ (root)**
-6. Click **Save**
-
-The site will be live at `https://koeppelmann.github.io/cow_viz/` within a few minutes.
+Ethereum, Gnosis, Arbitrum, Base, BNB Chain, Polygon, Avalanche, Linea, Lens, Sepolia (Testnet)
 
 ## Data Source
 
