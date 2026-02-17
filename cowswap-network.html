@@ -2402,7 +2402,13 @@
 
         // Track known orders to accumulate over time (like 3D view)
         let knownOrderUids = new Set();
+        let pendingOrderUids = []; // Orders waiting to be fetched
+        let isFetching = false;
+        let currentBatchDelay = 100; // Start with 100ms, increase on rate limit
+        const MIN_BATCH_DELAY = 100;
+        const MAX_BATCH_DELAY = 2000;
 
+        // Fetch orders from the auction list
         async function fetchOrders() {
             const network = document.getElementById('network').value;
             const apiNetwork = getApiNetwork(network);
@@ -2416,45 +2422,15 @@
 
                 document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
 
-                // Find new orders (not already known)
-                const newOrderUids = orderUids.filter(uid => !knownOrderUids.has(uid));
+                // Find new orders (not already known and not pending)
+                const newOrderUids = orderUids.filter(uid =>
+                    !knownOrderUids.has(uid) && !pendingOrderUids.includes(uid)
+                );
 
-                console.log(`[fetchOrders] Total orders in auction: ${orderUids.length}, new orders: ${newOrderUids.length}, known: ${knownOrderUids.size}`);
+                console.log(`[fetchOrders] Auction has ${orderUids.length} orders, ${newOrderUids.length} new, ${knownOrderUids.size} known, ${pendingOrderUids.length} pending`);
 
-                // Fetch new order details in batches (larger batches, fetch all)
-                const newOrders = [];
-                const batchSize = 50;
-
-                for (let i = 0; i < newOrderUids.length; i += batchSize) {
-                    const batch = newOrderUids.slice(i, i + batchSize);
-                    const orderPromises = batch.map(async uid => {
-                        try {
-                            const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
-                            if (orderRes.ok) {
-                                return await orderRes.json();
-                            }
-                        } catch (e) {}
-                        return null;
-                    });
-
-                    const batchResults = await Promise.all(orderPromises);
-                    newOrders.push(...batchResults.filter(o => o && o.status === 'open'));
-
-                    // Update stats as we go so user sees progress
-                    if (newOrders.length > 0) {
-                        document.getElementById('order-count').textContent = orders.size + newOrders.length;
-                    }
-
-                    // Small delay between batches to avoid rate limiting
-                    if (i + batchSize < newOrderUids.length) {
-                        await new Promise(r => setTimeout(r, 50));
-                    }
-                }
-
-                console.log(`[fetchOrders] Fetched ${newOrders.length} new orders`);
-
-                // Add new orders to known set
-                newOrders.forEach(order => knownOrderUids.add(order.uid));
+                // Add new orders to pending queue
+                pendingOrderUids.push(...newOrderUids);
 
                 // Check for filled/expired orders (no longer in auction)
                 const removedUids = [...knownOrderUids].filter(uid => !orderUids.includes(uid));
@@ -2463,18 +2439,81 @@
                     orders.delete(uid);
                 }
 
-                // Process only if we have new orders
-                if (newOrders.length > 0) {
-                    await processNewOrders(newOrders);
+                // Start fetching if not already running
+                if (!isFetching && pendingOrderUids.length > 0) {
+                    fetchOrdersIncrementally();
                 }
 
-                // Update stats even if no new orders
                 updateStats();
-                updateTokenList();
 
             } catch (error) {
-                console.error('Error fetching orders:', error);
+                console.error('Error fetching auction:', error);
             }
+        }
+
+        // Incrementally fetch order details and update visualization
+        async function fetchOrdersIncrementally() {
+            if (isFetching) return;
+            isFetching = true;
+
+            const network = document.getElementById('network').value;
+            const apiNetwork = getApiNetwork(network);
+            const batchSize = 20; // Smaller batches for more responsive updates
+
+            while (pendingOrderUids.length > 0) {
+                const batch = pendingOrderUids.splice(0, batchSize);
+                const batchOrders = [];
+                let rateLimited = false;
+
+                // Fetch batch with individual error handling
+                await Promise.all(batch.map(async uid => {
+                    try {
+                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
+
+                        if (orderRes.status === 429) {
+                            // Rate limited - put back in queue and slow down
+                            rateLimited = true;
+                            pendingOrderUids.unshift(uid);
+                            return;
+                        }
+
+                        if (orderRes.ok) {
+                            const order = await orderRes.json();
+                            if (order && order.status === 'open') {
+                                batchOrders.push(order);
+                                knownOrderUids.add(order.uid);
+                            }
+                        }
+                    } catch (e) {
+                        // Network error - put back in queue
+                        pendingOrderUids.push(uid);
+                    }
+                }));
+
+                // Process this batch immediately so visualization updates
+                if (batchOrders.length > 0) {
+                    await processNewOrders(batchOrders);
+                    updateStats();
+                    updateTokenList();
+                    console.log(`[fetch] +${batchOrders.length} orders (${orders.size} total, ${pendingOrderUids.length} pending)`);
+                }
+
+                // Adjust delay based on rate limiting
+                if (rateLimited) {
+                    currentBatchDelay = Math.min(currentBatchDelay * 2, MAX_BATCH_DELAY);
+                    console.log(`[fetch] Rate limited, slowing to ${currentBatchDelay}ms`);
+                } else {
+                    currentBatchDelay = Math.max(currentBatchDelay * 0.9, MIN_BATCH_DELAY);
+                }
+
+                // Wait before next batch
+                if (pendingOrderUids.length > 0) {
+                    await new Promise(r => setTimeout(r, currentBatchDelay));
+                }
+            }
+
+            isFetching = false;
+            console.log(`[fetch] Done, ${orders.size} total orders`);
         }
 
         function resetView() {
@@ -3090,6 +3129,9 @@
             edges.clear();
             orders.clear();
             knownOrderUids.clear();
+            pendingOrderUids = [];
+            isFetching = false;
+            currentBatchDelay = MIN_BATCH_DELAY;
             tokenPositions.clear();
             tokenPriceCache.clear();
             fetchOrders();
