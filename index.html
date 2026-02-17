@@ -454,6 +454,12 @@
                 <option value="xdai">Gnosis</option>
                 <option value="arbitrum_one">Arbitrum</option>
                 <option value="base">Base</option>
+                <option value="bsc">BNB Chain</option>
+                <option value="polygon">Polygon</option>
+                <option value="avalanche">Avalanche</option>
+                <option value="linea">Linea</option>
+                <option value="lens">Lens</option>
+                <option value="sepolia">Sepolia (Testnet)</option>
             </select>
             <button id="reset-view-btn">Reset View</button>
         </div>
@@ -546,6 +552,24 @@
     </div>
 
     <script>
+        // Map network dropdown values to CoW API network identifiers
+        const API_NETWORK_MAP = {
+            'mainnet': 'mainnet',
+            'xdai': 'xdai',
+            'arbitrum_one': 'arbitrum_one',
+            'base': 'base',
+            'bsc': 'bnb',
+            'polygon': 'polygon',
+            'avalanche': 'avalanche',
+            'linea': 'linea',
+            'lens': 'lens',
+            'sepolia': 'sepolia'
+        };
+
+        function getApiNetwork(network) {
+            return API_NETWORK_MAP[network] || network;
+        }
+
         // Token mappings with prices (approximate)
         const TOKENS = {
             '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': { symbol: 'WETH', decimals: 18, price: 3000 },
@@ -2624,9 +2648,10 @@
 
         async function fetchOrders() {
             const network = document.getElementById('network').value;
+            const apiNetwork = getApiNetwork(network);
 
             try {
-                const auctionRes = await fetch(`https://api.cow.fi/${network}/api/v2/solver_competition/latest`);
+                const auctionRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v2/solver_competition/latest`);
                 if (!auctionRes.ok) return;
 
                 const auctionData = await auctionRes.json();
@@ -2657,7 +2682,7 @@
 
                     try {
                         // Fetch actual order status
-                        const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
                         if (orderRes.ok) {
                             const order = await orderRes.json();
 
@@ -2686,7 +2711,7 @@
                 // Fetch new order details (limit batch size)
                 for (const uid of newOrderUids.slice(0, 15)) {
                     try {
-                        const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
                         if (orderRes.ok) {
                             const order = await orderRes.json();
                             if (order.status === 'open' && !balls.has(uid)) {
@@ -2704,7 +2729,7 @@
                 for (const uid of currentlyMissing) {
                     if (balls.has(uid)) {
                         try {
-                            const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                            const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
                             if (orderRes.ok) {
                                 const order = await orderRes.json();
                                 if (order.status === 'fulfilled') {
@@ -2740,13 +2765,14 @@
         // Fetch missing txHashes for batches that have a batchId but no txHash
         async function fetchMissingTxHashes() {
             const network = document.getElementById('network').value;
+            const apiNetwork = getApiNetwork(network);
             let updated = false;
 
             // Check batch history for missing txHashes (only first 20 to limit API calls)
             for (const batch of batchHistory.slice(0, 20)) {
                 if (batch.batchId && !batch.txHash) {
                     try {
-                        const res = await fetch(`https://api.cow.fi/${network}/api/v2/solver_competition/${batch.batchId}`);
+                        const res = await fetch(`https://api.cow.fi/${apiNetwork}/api/v2/solver_competition/${batch.batchId}`);
                         if (res.ok) {
                             const data = await res.json();
                             const txHashes = data.transactionHashes || [];

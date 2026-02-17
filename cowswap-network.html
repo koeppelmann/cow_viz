@@ -453,6 +453,11 @@
                 <option value="arbitrum_one">Arbitrum</option>
                 <option value="base">Base</option>
                 <option value="bsc">BNB Chain</option>
+                <option value="polygon">Polygon</option>
+                <option value="avalanche">Avalanche</option>
+                <option value="linea">Linea</option>
+                <option value="lens">Lens</option>
+                <option value="sepolia">Sepolia (Testnet)</option>
             </select>
             <button id="layout-toggle" onclick="toggleLayout()">Circle View</button>
             <button onclick="resetView()">Reset View</button>
@@ -897,7 +902,12 @@
             'xdai': 'https://rpc.gnosischain.com',
             'arbitrum_one': 'https://arb1.arbitrum.io/rpc',
             'base': 'https://mainnet.base.org',
-            'bsc': 'https://bsc-dataseed.binance.org'
+            'bsc': 'https://bsc-dataseed.binance.org',
+            'polygon': 'https://polygon-rpc.com',
+            'avalanche': 'https://api.avax.network/ext/bc/C/rpc',
+            'linea': 'https://rpc.linea.build',
+            'lens': 'https://rpc.lens.xyz',
+            'sepolia': 'https://rpc.sepolia.org'
         };
 
         // Native token info per network (0xeeee... address)
@@ -906,7 +916,12 @@
             'xdai': { symbol: 'xDAI', decimals: 18, category: 'stable' },
             'arbitrum_one': { symbol: 'ETH', decimals: 18, category: 'eth' },
             'base': { symbol: 'ETH', decimals: 18, category: 'eth' },
-            'bsc': { symbol: 'BNB', decimals: 18, category: 'other' }
+            'bsc': { symbol: 'BNB', decimals: 18, category: 'other' },
+            'polygon': { symbol: 'POL', decimals: 18, category: 'other' },
+            'avalanche': { symbol: 'AVAX', decimals: 18, category: 'other' },
+            'linea': { symbol: 'ETH', decimals: 18, category: 'eth' },
+            'lens': { symbol: 'GHO', decimals: 18, category: 'stable' },
+            'sepolia': { symbol: 'ETH', decimals: 18, category: 'eth' }
         };
 
         // Map network dropdown values to CoW API network identifiers
@@ -915,7 +930,12 @@
             'xdai': 'xdai',
             'arbitrum_one': 'arbitrum_one',
             'base': 'base',
-            'bsc': 'bnb'  // CoW API uses 'bnb' for BNB Chain
+            'bsc': 'bnb',
+            'polygon': 'polygon',
+            'avalanche': 'avalanche',
+            'linea': 'linea',
+            'lens': 'lens',
+            'sepolia': 'sepolia'
         };
 
         function getApiNetwork(network) {
@@ -953,6 +973,27 @@
                 'https://bsc-dataseed.binance.org',
                 'https://bsc.publicnode.com',
                 'https://rpc.ankr.com/bsc'
+            ],
+            'polygon': [
+                'https://polygon-rpc.com',
+                'https://polygon.publicnode.com',
+                'https://rpc.ankr.com/polygon'
+            ],
+            'avalanche': [
+                'https://api.avax.network/ext/bc/C/rpc',
+                'https://avalanche.publicnode.com',
+                'https://rpc.ankr.com/avalanche'
+            ],
+            'linea': [
+                'https://rpc.linea.build',
+                'https://linea.publicnode.com'
+            ],
+            'lens': [
+                'https://rpc.lens.xyz'
+            ],
+            'sepolia': [
+                'https://rpc.sepolia.org',
+                'https://ethereum-sepolia.publicnode.com'
             ]
         };
 
@@ -2929,7 +2970,12 @@
                 'xdai': 'https://explorer.cow.fi/gc',
                 'arbitrum_one': 'https://explorer.cow.fi/arb1',
                 'base': 'https://explorer.cow.fi/base',
-                'bsc': 'https://explorer.cow.fi/bnb'
+                'bsc': 'https://explorer.cow.fi/bnb',
+                'polygon': 'https://explorer.cow.fi/polygon',
+                'avalanche': 'https://explorer.cow.fi/avalanche',
+                'linea': 'https://explorer.cow.fi/linea',
+                'lens': 'https://explorer.cow.fi/lens',
+                'sepolia': 'https://explorer.cow.fi/sepolia'
             };
             return urls[network] || urls['mainnet'];
         }
