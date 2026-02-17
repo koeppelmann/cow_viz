@@ -1,0 +1,2956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoW Protocol - Order Drops</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+        }
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #ui-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            padding: 15px 20px;
+            background: linear-gradient(180deg, rgba(10,10,26,0.95) 0%, rgba(10,10,26,0) 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+        }
+        #ui-overlay > * {
+            pointer-events: auto;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo h1 {
+            font-size: 1.4rem;
+            color: #00d4aa;
+            font-weight: 700;
+        }
+        .logo span {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .stats {
+            display: flex;
+            gap: 30px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #00d4aa;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+        .controls select, .controls button {
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid #00d4aa;
+            color: #00d4aa;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .controls select:hover, .controls button:hover {
+            background: rgba(0, 212, 170, 0.2);
+        }
+        #order-panel {
+            position: fixed;
+            top: 80px;
+            right: -400px;
+            width: 380px;
+            height: calc(100vh - 100px);
+            background: rgba(20, 20, 40, 0.95);
+            border-left: 1px solid #333;
+            z-index: 20;
+            padding: 20px;
+            transition: right 0.3s ease;
+            overflow-y: auto;
+        }
+        #order-panel.open {
+            right: 0;
+        }
+        #order-panel .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        #order-panel .close-btn:hover {
+            color: #fff;
+        }
+        #order-panel h2 {
+            color: #00d4aa;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .order-detail {
+            margin-bottom: 15px;
+        }
+        .order-detail-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .order-detail-value {
+            font-size: 0.95rem;
+            color: #e0e0e0;
+            word-break: break-all;
+        }
+        .order-detail-value.highlight {
+            color: #00d4aa;
+            font-weight: 600;
+        }
+        .order-detail-value a {
+            color: #00d4aa;
+            text-decoration: none;
+        }
+        .order-detail-value a:hover {
+            text-decoration: underline;
+        }
+        .token-pair-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.2rem;
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(0, 212, 170, 0.1);
+            border-radius: 8px;
+        }
+        .token-pair-display .sell {
+            color: #ff6b6b;
+        }
+        .token-pair-display .buy {
+            color: #4ecdc4;
+        }
+        .token-pair-display .arrow {
+            color: #00d4aa;
+        }
+        .surplus-animation {
+            position: fixed;
+            pointer-events: none;
+            z-index: 100;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #22c55e;
+            text-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+            animation: surplusFloat 2s ease-out forwards;
+        }
+        @keyframes surplusFloat {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-100px) scale(1.5);
+            }
+        }
+        .legend {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            background: rgba(20, 20, 40, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            pointer-events: auto;
+        }
+        .legend h3 {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        #batch-info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(20, 20, 40, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            max-width: 320px;
+            max-height: calc(100vh - 150px);
+            overflow-y: auto;
+            pointer-events: auto;
+        }
+        #batch-info h3 {
+            font-size: 0.8rem;
+            color: #00d4aa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .batch-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid #1a1a2e;
+            font-size: 0.75rem;
+            gap: 10px;
+        }
+        .batch-row:last-child {
+            border-bottom: none;
+        }
+        .batch-id {
+            color: #888;
+            flex: 1;
+        }
+        .batch-orders {
+            color: #00d4aa;
+            font-weight: 600;
+            min-width: 20px;
+            text-align: right;
+        }
+        .expired-orders {
+            color: #ff6b6b;
+            font-weight: 600;
+        }
+        .batch-link {
+            color: #00d4aa;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .batch-link:hover {
+            color: #4fffdc;
+            text-decoration: underline;
+        }
+        .batch-surplus {
+            color: #22c55e;
+            font-size: 0.65rem;
+            font-weight: 500;
+        }
+        #controls-hint {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background: rgba(20, 20, 40, 0.8);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: #666;
+            pointer-events: none;
+        }
+        .filter-controls {
+            position: fixed;
+            top: 70px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(20, 20, 40, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            pointer-events: auto;
+        }
+        .filter-controls h3 {
+            font-size: 0.8rem;
+            color: #00d4aa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .filter-group {
+            margin-bottom: 12px;
+        }
+        .filter-group label {
+            font-size: 0.75rem;
+            color: #888;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 6px;
+        }
+        .filter-toggles {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .filter-toggle {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            border: 1px solid;
+            transition: all 0.2s;
+        }
+        .filter-toggle.active {
+            opacity: 1;
+        }
+        .filter-toggle:not(.active) {
+            opacity: 0.4;
+        }
+        .filter-toggle.market {
+            background: rgba(0, 212, 170, 0.2);
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+        .filter-toggle.limit {
+            background: rgba(255, 193, 7, 0.2);
+            border-color: #ffc107;
+            color: #ffc107;
+        }
+        .filter-toggle.twap {
+            background: rgba(168, 85, 247, 0.2);
+            border-color: #a855f7;
+            color: #a855f7;
+        }
+        .color-mode-select {
+            width: 100%;
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .color-mode-select:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+        .audio-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+        }
+        .audio-btn {
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            border: 1px solid #444;
+            background: rgba(0, 212, 170, 0.1);
+            color: #888;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .audio-btn:hover {
+            background: rgba(0, 212, 170, 0.2);
+            color: #00d4aa;
+        }
+        .audio-btn.active {
+            background: rgba(0, 212, 170, 0.3);
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+        .audio-btn .icon {
+            font-size: 1rem;
+        }
+        .volume-slider {
+            width: 100%;
+            margin-top: 8px;
+            accent-color: #00d4aa;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="ui-overlay">
+        <div class="logo">
+            <h1>CoW Order Drops</h1>
+            <span>Real-time order visualization</span>
+        </div>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value" id="block-countdown">12s</div>
+                <div class="stat-label">Next Block</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="auction-id">-</div>
+                <div class="stat-label">Auction</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="pending-orders">0</div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="filled-orders">0</div>
+                <div class="stat-label">Filled</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="expired-orders">0</div>
+                <div class="stat-label">Expired</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="total-volume">$0</div>
+                <div class="stat-label">Volume</div>
+            </div>
+        </div>
+        <div class="controls">
+            <select id="network">
+                <option value="mainnet">Ethereum</option>
+                <option value="xdai">Gnosis</option>
+                <option value="arbitrum_one">Arbitrum</option>
+                <option value="base">Base</option>
+            </select>
+            <button id="reset-view-btn">Reset View</button>
+        </div>
+    </div>
+
+    <div id="order-panel">
+        <button class="close-btn" onclick="closeOrderPanel()">&times;</button>
+        <h2>Order Details</h2>
+        <div id="order-details-content">
+            <p style="color: #666;">Click on an order ball to see details</p>
+        </div>
+    </div>
+
+    <div id="batch-info">
+        <h3>Settled Batches <span style="font-weight: normal; color: #555;">(100 blocks)</span></h3>
+        <div id="batch-list">
+            <div class="batch-row">
+                <span class="batch-id">Waiting for data...</span>
+            </div>
+        </div>
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #333;">
+            <div class="batch-row">
+                <span class="batch-id">🔴 Expired Orders</span>
+                <span class="expired-orders" id="expired-count">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="filter-controls">
+        <h3>Filters & Colors</h3>
+        <div class="filter-group">
+            <label>Order Types</label>
+            <div class="filter-toggles">
+                <div class="filter-toggle market active" data-type="market" onclick="toggleOrderTypeFilter('market')">Market</div>
+                <div class="filter-toggle limit active" data-type="limit" onclick="toggleOrderTypeFilter('limit')">Limit</div>
+                <div class="filter-toggle twap active" data-type="twap" onclick="toggleOrderTypeFilter('twap')">TWAP</div>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Color Mode</label>
+            <select class="color-mode-select" id="color-mode" onchange="changeColorMode(this.value)">
+                <option value="type">By Order Type</option>
+                <option value="time">By Age (Time)</option>
+                <option value="owner">By Owner</option>
+                <option value="pair">By Trading Pair</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="expiry-cliff-toggle" onchange="toggleExpiryCliff(this.checked)" style="accent-color: #00d4aa;">
+                <span>Expiry Cliff Mode</span>
+            </label>
+        </div>
+        <div class="audio-controls">
+            <button class="audio-btn" id="music-btn" onclick="toggleMusic()">
+                <span class="icon">🎵</span>
+                <span>Music</span>
+            </button>
+            <button class="audio-btn active" id="sfx-btn" onclick="toggleSFX()">
+                <span class="icon">🔊</span>
+                <span>SFX</span>
+            </button>
+        </div>
+        <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="50" onchange="setVolume(this.value)" title="Volume">
+    </div>
+
+    <div class="legend" id="legend">
+        <h3>Order Types</h3>
+        <div id="legend-content">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #00d4aa;"></div>
+                <span>Market Order</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ffc107;"></div>
+                <span>Limit Order</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #a855f7;"></div>
+                <span>TWAP Order</span>
+            </div>
+        </div>
+        <div class="legend-item" style="margin-top: 10px;">
+            <span style="color: #666;">Size = USD Value</span>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        Drag to rotate • Scroll to zoom • Right-drag to pan
+    </div>
+
+    <script>
+        // Token mappings with prices (approximate)
+        const TOKENS = {
+            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': { symbol: 'WETH', decimals: 18, price: 3000 },
+            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6, price: 1 },
+            '0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6, price: 1 },
+            '0x6b175474e89094c44da98b954eedeac495271d0f': { symbol: 'DAI', decimals: 18, price: 1 },
+            '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': { symbol: 'WBTC', decimals: 8, price: 60000 },
+            '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0': { symbol: 'wstETH', decimals: 18, price: 3500 },
+            '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': { symbol: 'cbBTC', decimals: 8, price: 60000 },
+            '0xae78736cd615f374d3085123a210448e74fc6393': { symbol: 'rETH', decimals: 18, price: 3200 },
+            '0x514910771af9ca656af840dff83e8264ecf986ca': { symbol: 'LINK', decimals: 18, price: 15 },
+            '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984': { symbol: 'UNI', decimals: 18, price: 10 },
+            // Gnosis
+            '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d': { symbol: 'WXDAI', decimals: 18, price: 1 },
+            '0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1': { symbol: 'WETH', decimals: 18, price: 3000 },
+            '0x9c58bacc331c9aa871afd802db6379a98e80cedb': { symbol: 'GNO', decimals: 18, price: 300 },
+            '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83': { symbol: 'USDC', decimals: 6, price: 1 },
+            // Arbitrum
+            '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': { symbol: 'WETH', decimals: 18, price: 3000 },
+            '0xaf88d065e77c8cc2239327c5edb3a432268e5831': { symbol: 'USDC', decimals: 6, price: 1 },
+            // Base
+            '0x4200000000000000000000000000000000000006': { symbol: 'WETH', decimals: 18, price: 3000 },
+            '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6, price: 1 },
+        };
+
+        // Three.js setup
+        let scene, camera, renderer, raycaster, mouse, controls;
+        let balls = new Map(); // uid -> ball mesh
+        let orderData = new Map(); // uid -> order data
+        let selectedBall = null;
+        let totalVolume = 0;
+        let filledCount = 0;
+        let expiredCount = 0;
+
+        // Scene layout - vertical with batches below
+        const GROUND_Y = 0;
+        const LAYER_SPACING = 5;
+        const EXPIRY_CLIFF_X = 40; // Right edge where orders fall off when they expire
+        const NUM_BATCH_LAYERS = 10; // Visual layers (10 blocks)
+        const NUM_BATCH_HISTORY = 100; // Batch history to show in sidebar list
+        const BLOCK_TIME = 12000; // 12 seconds per block
+
+        // Batch layer data
+        let batchLayers = []; // {layerMesh, balls: [], batchId, y} - visual layers (10)
+        let batchHistory = []; // {batchId, txHash, totalSurplus, orderCount, timestamp} - history (100)
+        let expiredBalls = [];
+        let lastBlockShiftTime = Date.now();
+        let pendingSettledOrders = []; // Orders waiting to be settled in next batch
+        let pendingAreaGroup = null; // The top pending area group (for animation)
+
+        // Physics settings
+        const GRAVITY = -0.015;
+        const BOUNCE_DAMPING = 0.45;
+        const FRICTION = 0.92;
+
+        // Colors for order types
+        const ORDER_COLORS = {
+            market: 0x00d4aa,
+            limit: 0xffc107,
+            twap: 0xa855f7,
+            unknown: 0x888888
+        };
+
+        // Color mode and filters
+        let colorMode = 'type'; // 'type', 'time', 'owner', 'pair'
+        let orderTypeFilters = { market: true, limit: true, twap: true, unknown: true };
+        let ownerColorMap = new Map(); // owner address -> color
+        let ownerColorIndex = 0;
+        let expiryCliffEnabled = false; // Whether orders move toward expiry cliff
+        let expiryModeElements = []; // Elements to show/hide based on expiry mode
+
+        // Token categories for pair-based coloring
+        const STABLECOINS = new Set([
+            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
+            '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
+            '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
+            '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d', // WXDAI (Gnosis)
+            '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83', // USDC (Gnosis)
+            '0xaf88d065e77c8cc2239327c5edb3a432268e5831', // USDC (Arbitrum)
+            '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC (Base)
+        ]);
+
+        const ETH_DERIVATIVES = new Set([
+            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // WETH
+            '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0', // wstETH
+            '0xae78736cd615f374d3085123a210448e74fc6393', // rETH
+            '0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1', // WETH (Gnosis)
+            '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', // WETH (Arbitrum)
+            '0x4200000000000000000000000000000000000006', // WETH (Base)
+        ]);
+
+        // Pair type colors - beautiful distinct palette
+        const PAIR_COLORS = {
+            'stable-stable': 0x4ade80,   // Green - stable swaps
+            'eth-eth': 0x60a5fa,         // Blue - ETH derivative swaps
+            'crypto-crypto': 0xf472b6,   // Pink - altcoin swaps
+            'stable-eth': 0x34d399,      // Teal - stable to/from ETH
+            'stable-crypto': 0xfbbf24,   // Yellow - stable to/from crypto
+            'eth-crypto': 0xa78bfa,      // Purple - ETH to/from crypto
+            'unknown': 0x888888
+        };
+
+        // Owner colors - distinct palette for up to 20 owners, then cycle
+        const OWNER_PALETTE = [
+            0xff6b6b, 0x4ecdc4, 0x45b7d1, 0x96ceb4, 0xffeaa7,
+            0xdfe6e9, 0xff7675, 0x74b9ff, 0x55efc4, 0xffeaa7,
+            0xa29bfe, 0xfd79a8, 0xe17055, 0x00b894, 0xe84393,
+            0x6c5ce7, 0xfdcb6e, 0x00cec9, 0xd63031, 0x0984e3
+        ];
+
+        // ========== AUDIO SYSTEM ==========
+        let audioContext = null;
+        let musicEnabled = false;
+        let sfxEnabled = true;
+        let masterVolume = 0.5;
+        let musicGainNode = null;
+        let musicOscillators = [];
+
+        // Initialize Web Audio API
+        function initAudio() {
+            if (audioContext) return;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        // Play a tone with given frequency and duration
+        function playTone(frequency, duration, type = 'sine', volume = 0.3, attack = 0.02, decay = 0.1) {
+            if (!sfxEnabled || !audioContext) return;
+
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+
+            // Envelope: attack -> sustain -> decay
+            const now = audioContext.currentTime;
+            const adjustedVolume = volume * masterVolume;
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(adjustedVolume, now + attack);
+            gainNode.gain.linearRampToValueAtTime(adjustedVolume * 0.7, now + attack + 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+            oscillator.start(now);
+            oscillator.stop(now + duration);
+        }
+
+        // Play chord (multiple tones)
+        function playChord(frequencies, duration, type = 'sine', volume = 0.15) {
+            frequencies.forEach((freq, i) => {
+                setTimeout(() => playTone(freq, duration, type, volume), i * 30);
+            });
+        }
+
+        // Sound for new order - pitch based on USD value (larger = deeper)
+        function playNewOrderSound(usdValue) {
+            if (!sfxEnabled) return;
+            initAudio();
+
+            // Logarithmic mapping: $10 -> high pitch, $1M -> low pitch
+            const logValue = Math.log10(Math.max(10, usdValue));
+            // Map from log(10)=1 to log(1000000)=6 -> frequency 800 to 150
+            const frequency = 800 - (logValue - 1) * 130;
+            const clampedFreq = Math.max(100, Math.min(800, frequency));
+
+            // Softer "plop" sound
+            playTone(clampedFreq, 0.15, 'sine', 0.25, 0.01, 0.1);
+            // Subtle harmonic
+            setTimeout(() => playTone(clampedFreq * 1.5, 0.1, 'sine', 0.1), 20);
+        }
+
+        // Sound for batch settled - pitch/richness based on surplus
+        function playBatchSettledSound(surplus, orderCount) {
+            if (!sfxEnabled) return;
+            initAudio();
+
+            if (orderCount === 0) {
+                // Empty batch - subtle low tone
+                playTone(120, 0.4, 'sine', 0.15);
+                playTone(90, 0.5, 'sine', 0.1);
+                return;
+            }
+
+            // Surplus determines richness of the sound
+            // Low surplus: simple tone, high surplus: rich chord
+            const basePitch = 220; // A3
+
+            if (surplus < 10) {
+                // Small surplus - simple rising tone
+                playTone(basePitch, 0.3, 'sine', 0.2);
+                setTimeout(() => playTone(basePitch * 1.25, 0.25, 'sine', 0.15), 100);
+            } else if (surplus < 100) {
+                // Medium surplus - pleasant chord
+                playChord([basePitch, basePitch * 1.25, basePitch * 1.5], 0.4, 'sine', 0.15);
+            } else if (surplus < 1000) {
+                // Good surplus - major chord with shimmer
+                playChord([basePitch, basePitch * 1.25, basePitch * 1.5, basePitch * 2], 0.5, 'sine', 0.12);
+                setTimeout(() => playTone(basePitch * 3, 0.3, 'sine', 0.08), 150);
+            } else {
+                // Excellent surplus - rich triumphant sound
+                playChord([basePitch, basePitch * 1.25, basePitch * 1.5, basePitch * 2], 0.6, 'triangle', 0.15);
+                setTimeout(() => {
+                    playChord([basePitch * 1.5, basePitch * 2, basePitch * 2.5], 0.5, 'sine', 0.1);
+                }, 200);
+                setTimeout(() => playTone(basePitch * 4, 0.4, 'sine', 0.08), 350);
+            }
+        }
+
+        // Sound for order expired
+        function playExpiredSound() {
+            if (!sfxEnabled) return;
+            initAudio();
+
+            // Descending minor tone
+            playTone(300, 0.2, 'sine', 0.15);
+            setTimeout(() => playTone(250, 0.25, 'sine', 0.12), 100);
+            setTimeout(() => playTone(200, 0.3, 'sine', 0.1), 200);
+        }
+
+        // Background music - ambient generative music
+        function startMusic() {
+            if (!audioContext) initAudio();
+            if (musicOscillators.length > 0) return;
+
+            musicGainNode = audioContext.createGain();
+            musicGainNode.connect(audioContext.destination);
+            musicGainNode.gain.setValueAtTime(masterVolume * 0.15, audioContext.currentTime);
+
+            // Create ambient drone layers
+            const droneFreqs = [55, 82.5, 110, 165]; // A1, E2, A2, E3
+
+            droneFreqs.forEach((freq, i) => {
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                const filter = audioContext.createBiquadFilter();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, audioContext.currentTime);
+
+                // Slight detuning for richness
+                if (i > 0) {
+                    osc.detune.setValueAtTime(Math.random() * 10 - 5, audioContext.currentTime);
+                }
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(400 + i * 100, audioContext.currentTime);
+
+                gain.gain.setValueAtTime(0.3 / (i + 1), audioContext.currentTime);
+
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(musicGainNode);
+
+                osc.start();
+                musicOscillators.push({ osc, gain, filter });
+            });
+
+            // Add subtle LFO modulation to create movement
+            const lfo = audioContext.createOscillator();
+            const lfoGain = audioContext.createGain();
+            lfo.frequency.setValueAtTime(0.1, audioContext.currentTime);
+            lfoGain.gain.setValueAtTime(50, audioContext.currentTime);
+            lfo.connect(lfoGain);
+
+            if (musicOscillators[2]) {
+                lfoGain.connect(musicOscillators[2].filter.frequency);
+            }
+            lfo.start();
+            musicOscillators.push({ osc: lfo, gain: lfoGain });
+
+            // Add occasional melodic notes
+            scheduleMelodyNote();
+        }
+
+        function scheduleMelodyNote() {
+            if (!musicEnabled || !audioContext) return;
+
+            const pentatonic = [220, 247.5, 293.7, 330, 392, 440, 495, 587.3]; // A pentatonic
+            const noteFreq = pentatonic[Math.floor(Math.random() * pentatonic.length)];
+
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(noteFreq, audioContext.currentTime);
+
+            const now = audioContext.currentTime;
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(masterVolume * 0.08, now + 0.5);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 3);
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+
+            osc.start(now);
+            osc.stop(now + 3);
+
+            // Schedule next note randomly between 3-8 seconds
+            const nextDelay = 3000 + Math.random() * 5000;
+            setTimeout(scheduleMelodyNote, nextDelay);
+        }
+
+        function stopMusic() {
+            musicOscillators.forEach(({ osc, gain }) => {
+                try {
+                    if (gain) {
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1);
+                    }
+                    setTimeout(() => {
+                        try { osc.stop(); } catch(e) {}
+                    }, 1100);
+                } catch(e) {}
+            });
+            musicOscillators = [];
+        }
+
+        function toggleMusic() {
+            initAudio();
+            musicEnabled = !musicEnabled;
+            const btn = document.getElementById('music-btn');
+
+            if (musicEnabled) {
+                startMusic();
+                btn.classList.add('active');
+            } else {
+                stopMusic();
+                btn.classList.remove('active');
+            }
+        }
+
+        function toggleSFX() {
+            sfxEnabled = !sfxEnabled;
+            const btn = document.getElementById('sfx-btn');
+            btn.classList.toggle('active', sfxEnabled);
+
+            // Play a test sound when enabling
+            if (sfxEnabled) {
+                initAudio();
+                playTone(440, 0.1, 'sine', 0.2);
+            }
+        }
+
+        function setVolume(value) {
+            masterVolume = value / 100;
+
+            if (musicGainNode && audioContext) {
+                musicGainNode.gain.setValueAtTime(masterVolume * 0.15, audioContext.currentTime);
+            }
+        }
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a1a);
+
+            // Camera - position to see all 10 layers (50 units deep)
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 30, 100);
+            camera.lookAt(0, -25, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Orbit Controls for drag/zoom
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = true;
+            controls.minDistance = 20;
+            controls.maxDistance = 200;
+            controls.maxPolarAngle = Math.PI / 1.5;
+            controls.target.set(0, -25, 0);
+
+            // Raycaster for click detection
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(20, 50, 30);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Point light for pending area
+            const pendingLight = new THREE.PointLight(0x00d4aa, 0.5, 100);
+            pendingLight.position.set(0, 20, 0);
+            scene.add(pendingLight);
+
+            // Create pending area (top) - main ground (as a group so it can move)
+            createPendingArea();
+
+            // Create settled batch layers (below pending area) - 100 layers for 100 blocks (~20 min)
+            for (let i = 0; i < NUM_BATCH_LAYERS; i++) {
+                createBatchLayer(i);
+            }
+
+            // Start the block timer
+            startBlockTimer();
+
+            // Create expired area (far right)
+            createExpiredArea();
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('click', onMouseClick);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            document.getElementById('network').addEventListener('change', () => {
+                clearAllBalls();
+                fetchOrders();
+            });
+            document.getElementById('reset-view-btn').addEventListener('click', resetView);
+
+            // Start animation loop
+            animate();
+
+            // Start fetching orders
+            fetchOrders();
+            setInterval(fetchOrders, 5000);
+        }
+
+        function resetView() {
+            camera.position.set(0, 40, 80);
+            controls.target.set(0, -25, 0);
+            controls.update();
+        }
+
+        function createTextLabel(text, x, y, z, color) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512;
+            canvas.height = 64;
+
+            context.fillStyle = 'transparent';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            context.font = 'Bold 36px Arial';
+            context.fillStyle = '#' + color.toString(16).padStart(6, '0');
+            context.textAlign = 'center';
+            context.fillText(text, 256, 45);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(x, y, z);
+            sprite.scale.set(20, 3, 1);
+            scene.add(sprite);
+        }
+
+        function createPendingArea() {
+            // Create a GROUP for the pending area so it can move with the animation
+            pendingAreaGroup = new THREE.Group();
+            pendingAreaGroup.position.set(0, GROUND_Y, 0);
+
+            // Large ground for pending orders
+            const groundGeometry = new THREE.PlaneGeometry(80, 60);
+            const groundMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x1a2a3a,
+                metalness: 0.2,
+                roughness: 0.4,
+                transparent: true,
+                opacity: 0.6,
+                side: THREE.DoubleSide
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.set(0, 0, 0); // Relative to group
+            ground.receiveShadow = true;
+            pendingAreaGroup.add(ground);
+
+            // Grid
+            const gridHelper = new THREE.GridHelper(80, 40, 0x224444, 0x112222);
+            gridHelper.position.set(0, 0.01, 0);
+            pendingAreaGroup.add(gridHelper);
+
+            // Glowing border
+            const borderMaterial = new THREE.MeshBasicMaterial({ color: 0x00d4aa });
+
+            const borderGeometryX = new THREE.BoxGeometry(80, 0.15, 0.15);
+            const borderGeometryZ = new THREE.BoxGeometry(0.15, 0.15, 60);
+
+            const frontBorder = new THREE.Mesh(borderGeometryX, borderMaterial);
+            frontBorder.position.set(0, 0, 30);
+            pendingAreaGroup.add(frontBorder);
+
+            const backBorder = new THREE.Mesh(borderGeometryX, borderMaterial);
+            backBorder.position.set(0, 0, -30);
+            pendingAreaGroup.add(backBorder);
+
+            const leftBorder = new THREE.Mesh(borderGeometryZ, borderMaterial);
+            leftBorder.position.set(-40, 0, 0);
+            pendingAreaGroup.add(leftBorder);
+
+            const rightBorder = new THREE.Mesh(borderGeometryZ, borderMaterial);
+            rightBorder.position.set(40, 0, 0);
+            pendingAreaGroup.add(rightBorder);
+
+            scene.add(pendingAreaGroup);
+
+            // Label (stays in place, not part of group)
+            createTextLabel("PENDING ORDERS", 0, 8, 0, 0x00d4aa);
+
+            // Time-to-expiry labels along the X axis (only shown in expiry cliff mode)
+            expiryModeElements.push(createSmallTextLabel("2+ weeks", -35, GROUND_Y + 1.5, 35, 0x4ade80));
+            expiryModeElements.push(createSmallTextLabel("1 day", -10, GROUND_Y + 1.5, 35, 0xfbbf24));
+            expiryModeElements.push(createSmallTextLabel("30 min", 15, GROUND_Y + 1.5, 35, 0xf97316));
+            expiryModeElements.push(createSmallTextLabel("5 min", 30, GROUND_Y + 1.5, 35, 0xff6b6b));
+        }
+
+        function createSmallTextLabel(text, x, y, z, color) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 48;
+
+            context.fillStyle = 'transparent';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            context.font = 'Bold 24px Arial';
+            context.fillStyle = '#' + color.toString(16).padStart(6, '0');
+            context.textAlign = 'center';
+            context.fillText(text, 128, 32);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(x, y, z);
+            sprite.scale.set(10, 2, 1);
+            scene.add(sprite);
+            return sprite; // Return the sprite so we can toggle visibility
+        }
+
+        function createBatchLayer(index) {
+            // Use the shared helper function and push to array
+            const layer = createBatchLayerAtIndex(index);
+            batchLayers.push(layer);
+        }
+
+        function createExpiredArea() {
+            // Create a "cliff edge" indicator on the right side of the pending area
+            // Orders roll toward this edge as they approach expiry
+
+            // Red danger zone strip on the right edge
+            const cliffGeometry = new THREE.PlaneGeometry(8, 60);
+            const cliffMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x4a1a1a,
+                metalness: 0.2,
+                roughness: 0.5,
+                transparent: true,
+                opacity: 0.4,
+                side: THREE.DoubleSide
+            });
+            const cliffZone = new THREE.Mesh(cliffGeometry, cliffMaterial);
+            cliffZone.rotation.x = -Math.PI / 2;
+            cliffZone.position.set(42, GROUND_Y - 0.05, 0);
+            scene.add(cliffZone);
+            expiryModeElements.push(cliffZone);
+
+            // Glowing red edge - the "cliff"
+            const edgeMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444 });
+            const edgeGeometry = new THREE.BoxGeometry(0.3, 0.3, 60);
+            const cliffEdge = new THREE.Mesh(edgeGeometry, edgeMaterial);
+            cliffEdge.position.set(40, GROUND_Y, 0);
+            scene.add(cliffEdge);
+            expiryModeElements.push(cliffEdge);
+
+            // Add warning stripes to danger zone
+            const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xff6b6b, transparent: true, opacity: 0.3 });
+            for (let z = -28; z <= 28; z += 8) {
+                const stripe = new THREE.Mesh(new THREE.BoxGeometry(8, 0.05, 2), stripeMaterial);
+                stripe.position.set(42, GROUND_Y + 0.02, z);
+                scene.add(stripe);
+                expiryModeElements.push(stripe);
+            }
+
+            // "EXPIRY" label at the cliff
+            const expiryLabel = createTextLabelReturnable("▼ EXPIRY ▼", 44, GROUND_Y + 3, 0, 0xff6b6b);
+            expiryModeElements.push(expiryLabel);
+
+            // Create visual indication of the abyss below
+            // Gradient fade below the cliff
+            for (let i = 0; i < 5; i++) {
+                const abyssGeometry = new THREE.PlaneGeometry(15, 60);
+                const abyssMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x1a0a0a,
+                    transparent: true,
+                    opacity: 0.3 - i * 0.05,
+                    side: THREE.DoubleSide
+                });
+                const abyssPlane = new THREE.Mesh(abyssGeometry, abyssMaterial);
+                abyssPlane.rotation.x = -Math.PI / 2;
+                abyssPlane.position.set(45 + i * 2, GROUND_Y - (i + 1) * LAYER_SPACING, 0);
+                scene.add(abyssPlane);
+                expiryModeElements.push(abyssPlane);
+            }
+        }
+
+        // Same as createTextLabel but returns the sprite
+        function createTextLabelReturnable(text, x, y, z, color) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512;
+            canvas.height = 64;
+
+            context.fillStyle = 'transparent';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            context.font = 'Bold 36px Arial';
+            context.fillStyle = '#' + color.toString(16).padStart(6, '0');
+            context.textAlign = 'center';
+            context.fillText(text, 256, 45);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(x, y, z);
+            sprite.scale.set(20, 3, 1);
+            scene.add(sprite);
+            return sprite;
+        }
+
+        function getTokenInfo(address) {
+            const addr = address.toLowerCase();
+            return TOKENS[addr] || { symbol: addr.slice(0, 6) + '...', decimals: 18, price: 0 };
+        }
+
+        function getOrderClass(order) {
+            if (order.fullAppData) {
+                try {
+                    const appData = JSON.parse(order.fullAppData);
+                    const orderClass = appData?.metadata?.orderClass?.orderClass;
+                    if (orderClass) return orderClass.toLowerCase();
+                } catch (e) {}
+            }
+            return order.class || 'unknown';
+        }
+
+        function calculateUSDValue(order) {
+            const sellToken = getTokenInfo(order.sellToken);
+            const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellToken.decimals);
+            return sellAmount * sellToken.price;
+        }
+
+        // Calculate actual surplus in USD from executed amounts
+        function calculateSurplusUSD(order) {
+            // Surplus is the extra tokens received beyond what was requested
+            // For buy orders: executedBuyAmount - buyAmount (in buy token)
+            // For sell orders: sellAmount - executedSellAmount (in sell token) - but CoW usually gives surplus in buy token
+
+            const buyToken = getTokenInfo(order.buyToken);
+            const executedBuy = parseFloat(order.executedBuyAmount || 0);
+            const requestedBuy = parseFloat(order.buyAmount || 0);
+
+            if (executedBuy > requestedBuy) {
+                // Surplus in buy token
+                const surplusAmount = (executedBuy - requestedBuy) / Math.pow(10, buyToken.decimals);
+
+                // Get price - use $1 for stablecoins if price not set
+                let price = buyToken.price;
+                if (price === 0) {
+                    const buyTokenAddr = order.buyToken.toLowerCase();
+                    if (STABLECOINS.has(buyTokenAddr)) {
+                        price = 1; // Stablecoins are ~$1
+                    }
+                }
+
+                return surplusAmount * price;
+            }
+
+            return 0;
+        }
+
+        // Get token category: 'stable', 'eth', or 'crypto'
+        function getTokenCategory(tokenAddress) {
+            const addr = tokenAddress.toLowerCase();
+            if (STABLECOINS.has(addr)) return 'stable';
+            if (ETH_DERIVATIVES.has(addr)) return 'eth';
+            return 'crypto';
+        }
+
+        // Get pair type for coloring
+        function getPairType(order) {
+            const sellCategory = getTokenCategory(order.sellToken);
+            const buyCategory = getTokenCategory(order.buyToken);
+
+            // Sort categories to normalize (e.g., stable-eth same as eth-stable)
+            const categories = [sellCategory, buyCategory].sort();
+            return categories.join('-');
+        }
+
+        // Get color based on order age (logarithmic scale)
+        // Fresh orders change color quickly, old orders slowly
+        function getAgeColor(order) {
+            const creationTime = new Date(order.creationDate).getTime();
+            const now = Date.now();
+            const ageMs = now - creationTime;
+
+            // Convert to seconds
+            const ageSec = ageMs / 1000;
+
+            // Logarithmic scale: 1 sec to 2 weeks (1,209,600 seconds)
+            // Use log10 to spread the colors
+            const maxAge = 14 * 24 * 60 * 60; // 2 weeks in seconds
+            const minAge = 1; // 1 second
+
+            // Clamp age
+            const clampedAge = Math.max(minAge, Math.min(maxAge, ageSec));
+
+            // Logarithmic progress (0 = fresh, 1 = 2 weeks old)
+            const logMin = Math.log10(minAge);
+            const logMax = Math.log10(maxAge);
+            const logAge = Math.log10(clampedAge);
+            const progress = (logAge - logMin) / (logMax - logMin);
+
+            // Color gradient: Bright cyan (fresh) -> Yellow -> Orange -> Red -> Dark red (old)
+            // Using HSL for smooth transitions
+            // Hue: 180 (cyan) -> 60 (yellow) -> 30 (orange) -> 0 (red)
+            const hue = 180 - progress * 180; // 180 to 0
+            const saturation = 0.8 - progress * 0.3; // 0.8 to 0.5
+            const lightness = 0.55 - progress * 0.15; // 0.55 to 0.4
+
+            const color = new THREE.Color();
+            color.setHSL(hue / 360, saturation, lightness);
+            return color.getHex();
+        }
+
+        // Get color based on owner address
+        function getOwnerColor(owner) {
+            const addr = owner.toLowerCase();
+            if (!ownerColorMap.has(addr)) {
+                ownerColorMap.set(addr, OWNER_PALETTE[ownerColorIndex % OWNER_PALETTE.length]);
+                ownerColorIndex++;
+            }
+            return ownerColorMap.get(addr);
+        }
+
+        // Get color for a ball based on current color mode
+        function getBallColor(order) {
+            const orderClass = getOrderClass(order);
+
+            switch (colorMode) {
+                case 'type':
+                    return ORDER_COLORS[orderClass] || ORDER_COLORS.unknown;
+                case 'time':
+                    return getAgeColor(order);
+                case 'owner':
+                    return getOwnerColor(order.owner);
+                case 'pair':
+                    const pairType = getPairType(order);
+                    return PAIR_COLORS[pairType] || PAIR_COLORS.unknown;
+                default:
+                    return ORDER_COLORS[orderClass] || ORDER_COLORS.unknown;
+            }
+        }
+
+        // Toggle order type filter
+        function toggleOrderTypeFilter(type) {
+            orderTypeFilters[type] = !orderTypeFilters[type];
+
+            // Update button visual
+            const btn = document.querySelector(`.filter-toggle[data-type="${type}"]`);
+            if (btn) {
+                btn.classList.toggle('active', orderTypeFilters[type]);
+            }
+
+            // Update ball visibility
+            updateBallVisibility();
+        }
+
+        // Update visibility of all balls based on filters
+        function updateBallVisibility() {
+            balls.forEach((ball, uid) => {
+                const order = orderData.get(uid);
+                if (order) {
+                    const orderClass = getOrderClass(order);
+                    const shouldShow = orderTypeFilters[orderClass] !== false;
+                    ball.visible = shouldShow;
+                }
+            });
+
+            // Also update settled balls in batch layers
+            batchLayers.forEach(layer => {
+                layer.balls.forEach(ball => {
+                    const order = orderData.get(ball.userData.uid);
+                    if (order) {
+                        const orderClass = getOrderClass(order);
+                        const shouldShow = orderTypeFilters[orderClass] !== false;
+                        ball.visible = shouldShow;
+                    }
+                });
+            });
+
+            // And expired balls
+            expiredBalls.forEach(ball => {
+                const order = orderData.get(ball.userData.uid);
+                if (order) {
+                    const orderClass = getOrderClass(order);
+                    const shouldShow = orderTypeFilters[orderClass] !== false;
+                    ball.visible = shouldShow;
+                }
+            });
+        }
+
+        // Change color mode
+        function changeColorMode(mode) {
+            colorMode = mode;
+
+            // Update all ball colors
+            updateAllBallColors();
+
+            // Update legend
+            updateLegend();
+        }
+
+        // Toggle expiry cliff mode
+        function toggleExpiryCliff(enabled) {
+            expiryCliffEnabled = enabled;
+            // Show/hide all expiry mode visual elements (time labels, cliff, abyss)
+            expiryModeElements.forEach(element => {
+                element.visible = enabled;
+            });
+
+            // Redistribute existing pending orders when mode changes
+            if (!enabled) {
+                // When turning OFF expiry mode, redistribute orders evenly
+                balls.forEach((ball, uid) => {
+                    if (ball.userData.area === 'pending') {
+                        // Assign new random target position
+                        const targetX = (Math.random() - 0.5) * 70;
+                        const targetZ = (Math.random() - 0.5) * 50;
+
+                        // Animate smoothly to new position
+                        const startX = ball.position.x;
+                        const startZ = ball.position.z;
+                        const startTime = Date.now();
+                        const duration = 1500; // 1.5 second transition
+
+                        function animateRedistribute() {
+                            const elapsed = Date.now() - startTime;
+                            const progress = Math.min(1, elapsed / duration);
+                            // Ease out cubic
+                            const eased = 1 - Math.pow(1 - progress, 3);
+
+                            ball.position.x = startX + (targetX - startX) * eased;
+                            ball.position.z = startZ + (targetZ - startZ) * eased;
+
+                            if (progress < 1) {
+                                requestAnimationFrame(animateRedistribute);
+                            }
+                        }
+                        animateRedistribute();
+                    }
+                });
+            } else {
+                // When turning ON expiry mode, move orders to their expiry positions
+                balls.forEach((ball, uid) => {
+                    if (ball.userData.area === 'pending') {
+                        const order = orderData.get(uid);
+                        if (order) {
+                            const targetX = getExpiryXPosition(order);
+                            const startX = ball.position.x;
+                            const startTime = Date.now();
+                            const duration = 1500;
+
+                            function animateToExpiry() {
+                                const elapsed = Date.now() - startTime;
+                                const progress = Math.min(1, elapsed / duration);
+                                const eased = 1 - Math.pow(1 - progress, 3);
+
+                                ball.position.x = startX + (targetX - startX) * eased;
+
+                                if (progress < 1) {
+                                    requestAnimationFrame(animateToExpiry);
+                                }
+                            }
+                            animateToExpiry();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Update colors of all balls
+        function updateAllBallColors() {
+            balls.forEach((ball, uid) => {
+                const order = orderData.get(uid);
+                if (order && ball.userData.area === 'pending') {
+                    const color = getBallColor(order);
+                    ball.material.color.setHex(color);
+                    ball.material.emissive.setHex(color);
+                }
+            });
+
+            // Also update settled balls
+            batchLayers.forEach(layer => {
+                layer.balls.forEach(ball => {
+                    const order = orderData.get(ball.userData.uid);
+                    if (order) {
+                        const color = getBallColor(order);
+                        ball.material.color.setHex(color);
+                        ball.material.emissive.setHex(color);
+                    }
+                });
+            });
+        }
+
+        // Update legend based on color mode
+        function updateLegend() {
+            const legendTitle = document.querySelector('.legend h3');
+            const legendContent = document.getElementById('legend-content');
+
+            switch (colorMode) {
+                case 'type':
+                    legendTitle.textContent = 'Order Types';
+                    legendContent.innerHTML = `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #00d4aa;"></div>
+                            <span>Market Order</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #ffc107;"></div>
+                            <span>Limit Order</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #a855f7;"></div>
+                            <span>TWAP Order</span>
+                        </div>
+                    `;
+                    break;
+                case 'time':
+                    legendTitle.textContent = 'Order Age';
+                    legendContent.innerHTML = `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #00d4aa;"></div>
+                            <span>&lt; 1 min</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #4ade80;"></div>
+                            <span>~ 10 min</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #fbbf24;"></div>
+                            <span>~ 1 hour</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #f97316;"></div>
+                            <span>~ 1 day</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #dc2626;"></div>
+                            <span>~ 1 week</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #7f1d1d;"></div>
+                            <span>&gt; 2 weeks</span>
+                        </div>
+                    `;
+                    break;
+                case 'owner':
+                    legendTitle.textContent = 'By Owner';
+                    legendContent.innerHTML = `
+                        <div class="legend-item">
+                            <span style="color: #888;">Each owner gets a unique color</span>
+                        </div>
+                        <div class="legend-item">
+                            <div style="display: flex; gap: 3px;">
+                                ${OWNER_PALETTE.slice(0, 10).map(c =>
+                                    `<div class="legend-color" style="background: #${c.toString(16).padStart(6, '0')}; width: 8px; height: 8px;"></div>`
+                                ).join('')}
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'pair':
+                    legendTitle.textContent = 'Trading Pairs';
+                    legendContent.innerHTML = `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #4ade80;"></div>
+                            <span>Stable ↔ Stable</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #60a5fa;"></div>
+                            <span>ETH ↔ ETH</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #f472b6;"></div>
+                            <span>Crypto ↔ Crypto</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #34d399;"></div>
+                            <span>Stable ↔ ETH</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #fbbf24;"></div>
+                            <span>Stable ↔ Crypto</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #a78bfa;"></div>
+                            <span>ETH ↔ Crypto</span>
+                        </div>
+                    `;
+                    break;
+            }
+        }
+
+        function createBall(order) {
+            const usdValue = calculateUSDValue(order);
+            const orderClass = getOrderClass(order);
+
+            // Check if this order type is filtered out
+            const shouldShow = orderTypeFilters[orderClass] !== false;
+
+            // Smaller balls - size based on USD value (logarithmic scale)
+            const minRadius = 0.15;
+            const maxRadius = 1.2;
+            const radius = Math.min(maxRadius, Math.max(minRadius, Math.log10(usdValue + 1) * 0.22));
+
+            // Get color based on current color mode
+            const color = getBallColor(order);
+
+            // Create sphere
+            const geometry = new THREE.SphereGeometry(radius, 20, 20);
+            const material = new THREE.MeshPhysicalMaterial({
+                color: color,
+                metalness: 0.4,
+                roughness: 0.3,
+                transparent: true,
+                opacity: 0.9,
+                emissive: color,
+                emissiveIntensity: 0.15
+            });
+
+            const ball = new THREE.Mesh(geometry, material);
+
+            // Store order data first so getExpiryXPosition can use it
+            orderData.set(order.uid, order);
+
+            // Start position depends on expiry cliff mode
+            let startX;
+            if (expiryCliffEnabled) {
+                const targetX = getExpiryXPosition(order);
+                startX = targetX + (Math.random() - 0.5) * 5; // Near target X with small random offset
+            } else {
+                startX = (Math.random() - 0.5) * 70; // Random X position
+            }
+            ball.position.set(
+                startX,
+                20 + Math.random() * 15,
+                (Math.random() - 0.5) * 50
+            );
+
+            ball.castShadow = true;
+            ball.receiveShadow = true;
+            ball.visible = shouldShow;
+
+            // Physics data
+            ball.userData = {
+                uid: order.uid,
+                velocity: new THREE.Vector3(0, 0, 0),
+                radius: radius,
+                isSettled: false,
+                usdValue: usdValue,
+                orderClass: orderClass,
+                area: 'pending',
+                fallingOffCliff: false
+            };
+
+            scene.add(ball);
+            balls.set(order.uid, ball);
+            // orderData already set above for getExpiryXPosition
+            totalVolume += usdValue;
+            updateStats();
+
+            // Play sound for new order (pitch based on size)
+            playNewOrderSound(usdValue);
+
+            return ball;
+        }
+
+        // Calculate X position based on time to expiry (logarithmic scale)
+        // Left side (-38) = 2 weeks or more, Right side (38) = expiry cliff
+        function getExpiryXPosition(order) {
+            const expiryTime = order.validTo * 1000; // Convert to milliseconds
+            const now = Date.now();
+            const timeToExpiry = expiryTime - now;
+
+            // Time ranges (in milliseconds)
+            const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+            const thirtyMin = 30 * 60 * 1000;
+            const oneMin = 60 * 1000;
+
+            // Clamp time to expiry
+            const clampedTime = Math.max(0, Math.min(twoWeeks, timeToExpiry));
+
+            if (clampedTime <= 0) {
+                return 40; // Past the cliff edge
+            }
+
+            // Logarithmic mapping:
+            // 2 weeks -> left edge (-38)
+            // 30 min -> middle (0)
+            // 0 -> right edge (38, the cliff)
+            const logMin = Math.log10(oneMin); // ~4.78 (1 minute as minimum for log)
+            const logMax = Math.log10(twoWeeks); // ~9.08
+            const logMid = Math.log10(thirtyMin); // ~6.26
+
+            const logTime = Math.log10(Math.max(oneMin, clampedTime));
+
+            // Map logarithmically: logMax -> -38, logMin -> 38
+            const progress = (logMax - logTime) / (logMax - logMin);
+            const xPos = -38 + progress * 76; // -38 to 38
+
+            return Math.max(-38, Math.min(38, xPos));
+        }
+
+        function updatePhysics() {
+            balls.forEach((ball, uid) => {
+                if (ball.userData.area !== 'pending') return;
+
+                const ud = ball.userData;
+                const order = orderData.get(uid);
+
+                if (!order) return;
+
+                // Only use expiry-based positioning if expiry cliff mode is enabled
+                if (expiryCliffEnabled) {
+                    // Calculate target X position based on time to expiry
+                    const targetX = getExpiryXPosition(order);
+
+                    // Check if order has expired (past the cliff)
+                    if (targetX >= 39) {
+                        // Order expired! Start falling off the cliff
+                        if (!ud.fallingOffCliff) {
+                            ud.fallingOffCliff = true;
+                            ud.isSettled = false;
+                            ud.velocity.set(0.5, 0, 0); // Push over the edge
+                            playExpiredSound();
+                        }
+                    }
+
+                    if (ud.fallingOffCliff) {
+                        // Falling off the cliff - move to expired area
+                        ud.velocity.y += GRAVITY * 0.5; // Slower gravity for dramatic effect
+                        ud.velocity.x *= 0.98; // Slow down horizontal
+                        ball.position.add(ud.velocity);
+
+                        // Once fallen far enough, transition to expired
+                        if (ball.position.y < GROUND_Y - 3) {
+                            ud.fallingOffCliff = false;
+                            moveBallToExpired(ball);
+                            balls.delete(uid);
+                            expiredCount++;
+                            updateStats();
+                            document.getElementById('expired-count').textContent = expiredCount;
+                        }
+                        return;
+                    }
+
+                    // Normal physics for non-expired orders
+
+                    // Apply gravity (for initial drop)
+                    if (!ud.isSettled) {
+                        ud.velocity.y += GRAVITY;
+                    }
+
+                    // Apply velocity
+                    ball.position.add(ud.velocity);
+
+                    // Ground collision (pending area)
+                    const groundLevel = GROUND_Y + ud.radius;
+                    if (ball.position.y <= groundLevel) {
+                        ball.position.y = groundLevel;
+
+                        if (Math.abs(ud.velocity.y) < 0.02) {
+                            ud.velocity.y = 0;
+                            ud.isSettled = true;
+                        } else {
+                            ud.velocity.y = -ud.velocity.y * BOUNCE_DAMPING;
+                            ud.velocity.x *= FRICTION;
+                            ud.velocity.z *= FRICTION;
+                        }
+                    }
+
+                    // Once settled, smoothly move toward target X (expiry position)
+                    if (ud.isSettled) {
+                        const dx = targetX - ball.position.x;
+                        // Move faster as we get closer to expiry (natural from logarithmic time)
+                        ball.position.x += dx * 0.02;
+                    }
+                } else {
+                    // Original physics - no expiry-based movement
+
+                    // Apply gravity (for initial drop)
+                    if (!ud.isSettled) {
+                        ud.velocity.y += GRAVITY;
+                    }
+
+                    // Apply velocity
+                    ball.position.add(ud.velocity);
+
+                    // Ground collision (pending area)
+                    const groundLevel = GROUND_Y + ud.radius;
+                    if (ball.position.y <= groundLevel) {
+                        ball.position.y = groundLevel;
+
+                        if (Math.abs(ud.velocity.y) < 0.02) {
+                            ud.velocity.set(0, 0, 0);
+                            ud.isSettled = true;
+                        } else {
+                            ud.velocity.y = -ud.velocity.y * BOUNCE_DAMPING;
+                            ud.velocity.x *= FRICTION;
+                            ud.velocity.z *= FRICTION;
+                        }
+                    }
+
+                    // Keep within pending area bounds (original behavior)
+                    const boundX = 38;
+                    if (ball.position.x < -boundX) {
+                        ball.position.x = -boundX;
+                        ud.velocity.x *= -0.5;
+                    }
+                    if (ball.position.x > boundX) {
+                        ball.position.x = boundX;
+                        ud.velocity.x *= -0.5;
+                    }
+                }
+
+                // Ball-to-ball collision (simplified)
+                balls.forEach((otherBall, otherUid) => {
+                    if (uid === otherUid) return;
+                    if (otherBall.userData.area !== 'pending') return;
+                    if (otherBall.userData.fallingOffCliff) return;
+
+                    const dist = ball.position.distanceTo(otherBall.position);
+                    const minDist = ud.radius + otherBall.userData.radius;
+
+                    if (dist < minDist && dist > 0) {
+                        const overlap = minDist - dist;
+                        const direction = new THREE.Vector3()
+                            .subVectors(ball.position, otherBall.position)
+                            .normalize();
+
+                        // Push direction depends on mode
+                        const pushDir = direction.clone();
+                        if (expiryCliffEnabled) {
+                            pushDir.x *= 0.2; // Reduce X push in expiry mode
+                        }
+                        ball.position.add(pushDir.multiplyScalar(overlap * 0.5));
+                    }
+                });
+
+                // Keep within pending area bounds (Z always)
+                const boundZ = 28;
+
+                if (ball.position.z < -boundZ) {
+                    ball.position.z = -boundZ;
+                    ud.velocity.z *= -0.5;
+                }
+                if (ball.position.z > boundZ) {
+                    ball.position.z = boundZ;
+                    ud.velocity.z *= -0.5;
+                }
+
+                // X bounds - depends on expiry cliff mode
+                if (expiryCliffEnabled) {
+                    // Only constrain left edge in expiry mode (right edge is the cliff)
+                    if (ball.position.x < -38) {
+                        ball.position.x = -38;
+                    }
+                } else {
+                    // Constrain both edges when expiry mode is off
+                    const boundX = 35;
+                    if (ball.position.x < -boundX) {
+                        ball.position.x = -boundX;
+                        ud.velocity.x *= -0.5;
+                    }
+                    if (ball.position.x > boundX) {
+                        ball.position.x = boundX;
+                        ud.velocity.x *= -0.5;
+                    }
+                }
+            });
+        }
+
+        function moveBallToSettledLayer(ball, layerIndex) {
+            if (layerIndex >= batchLayers.length) return;
+
+            const layer = batchLayers[layerIndex];
+            ball.userData.area = 'settled';
+            ball.userData.isSettled = true;
+            ball.userData.settledLayerIndex = layerIndex; // Track which layer this ball belongs to
+
+            // Add ball to layer immediately (for accurate counting)
+            layer.balls.push(ball);
+            updateBatchInfo();
+
+            const targetX = (Math.random() - 0.5) * 60;
+            const targetZ = (Math.random() - 0.5) * 40;
+
+            // Animate the ball moving down to layer
+            const startPos = ball.position.clone();
+            const startTime = Date.now();
+            const duration = 1000;
+
+            function animateToLayer() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(1, elapsed / duration);
+
+                // Ease out cubic
+                const eased = 1 - Math.pow(1 - progress, 3);
+
+                // DYNAMICALLY track layer's current Y position (it might be animating too)
+                const currentLayerY = layer.group.position.y;
+                const targetY = currentLayerY + ball.userData.radius;
+
+                ball.position.x = startPos.x + (targetX - startPos.x) * eased;
+                ball.position.y = startPos.y + (targetY - startPos.y) * eased;
+                ball.position.z = startPos.z + (targetZ - startPos.z) * eased;
+
+                // Slight fade for deeper layers
+                ball.material.opacity = 0.9 - (layerIndex * 0.1);
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateToLayer);
+                } else {
+                    // Ensure ball is exactly on the layer surface when done
+                    ball.position.y = layer.group.position.y + ball.userData.radius;
+                }
+            }
+
+            animateToLayer();
+        }
+
+        function moveBallToExpired(ball) {
+            ball.userData.area = 'expired';
+            ball.userData.isSettled = false;
+            ball.userData.expiredLayer = 0; // Start at layer 0 (just below pending)
+            ball.userData.expiredStartTime = Date.now();
+
+            // Change color to reddish
+            ball.material.color.setHex(0xff6b6b);
+            ball.material.emissive.setHex(0xff6b6b);
+            ball.material.opacity = 0.8;
+
+            // Move to right side of the platform (cliff edge) and start descent
+            const targetX = 42 + (Math.random() - 0.5) * 10; // Just past the cliff edge
+
+            // Initial position - keep Z, move X to cliff area
+            ball.position.x = targetX;
+
+            expiredBalls.push(ball);
+        }
+
+        // Update expired balls - they descend through layers (12 sec per layer)
+        function updateExpiredBalls() {
+            const now = Date.now();
+
+            expiredBalls.forEach((ball, index) => {
+                if (!ball.userData.expiredStartTime) return;
+
+                const elapsed = now - ball.userData.expiredStartTime;
+                const layerTime = BLOCK_TIME; // 12 seconds per layer
+
+                // Calculate which layer the ball should be at
+                const targetLayer = Math.floor(elapsed / layerTime);
+                const layerProgress = (elapsed % layerTime) / layerTime;
+
+                // Calculate Y position - descending through layers
+                const layerY = GROUND_Y - (targetLayer + layerProgress) * LAYER_SPACING;
+                const targetY = layerY + ball.userData.radius;
+
+                // Smoothly move to target Y
+                ball.position.y += (targetY - ball.position.y) * 0.1;
+
+                // Add slight wobble/drift as it falls
+                ball.position.x += Math.sin(elapsed * 0.001 + index) * 0.02;
+                ball.position.z += Math.cos(elapsed * 0.0015 + index) * 0.015;
+
+                // Fade out as it approaches layer 10 (120 seconds)
+                const fadeStart = 8; // Start fading at layer 8
+                if (targetLayer >= fadeStart) {
+                    const fadeProgress = (targetLayer - fadeStart) / (NUM_BATCH_LAYERS - fadeStart);
+                    ball.material.opacity = 0.8 * (1 - fadeProgress);
+                    ball.scale.setScalar(1 - fadeProgress * 0.3);
+                }
+
+                // Remove when past layer 10
+                if (targetLayer >= NUM_BATCH_LAYERS) {
+                    scene.remove(ball);
+                    expiredBalls.splice(index, 1);
+                }
+            });
+        }
+
+        function showSurplusAnimation(ball, surplus) {
+            if (surplus <= 0) return;
+
+            const vector = ball.position.clone();
+            vector.project(camera);
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+
+            const div = document.createElement('div');
+            div.className = 'surplus-animation';
+            div.style.left = x + 'px';
+            div.style.top = y + 'px';
+            div.textContent = `+$${surplus.toFixed(2)}`;
+            document.body.appendChild(div);
+
+            setTimeout(() => div.remove(), 2000);
+        }
+
+        function showBigBatchSettleAnimation(totalSurplus, orderCount) {
+            // Create a big center animation for batch settlement
+            const div = document.createElement('div');
+            div.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                z-index: 1000;
+                text-align: center;
+                pointer-events: none;
+                animation: batchSettle 2.5s ease-out forwards;
+            `;
+            div.innerHTML = `
+                <div style="font-size: 3rem; font-weight: 800; color: #22c55e; text-shadow: 0 0 30px rgba(34, 197, 94, 0.8);">
+                    BATCH SETTLED
+                </div>
+                <div style="font-size: 2rem; color: #00d4aa; margin-top: 10px;">
+                    ${orderCount} Orders Filled
+                </div>
+                <div style="font-size: 2.5rem; font-weight: 700; color: #ffd700; margin-top: 10px; text-shadow: 0 0 20px rgba(255, 215, 0, 0.8);">
+                    +$${totalSurplus.toLocaleString(undefined, {maximumFractionDigits: 2})} Surplus
+                </div>
+            `;
+            document.body.appendChild(div);
+
+            // Add keyframe animation
+            if (!document.getElementById('batch-settle-style')) {
+                const style = document.createElement('style');
+                style.id = 'batch-settle-style';
+                style.textContent = `
+                    @keyframes batchSettle {
+                        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+                        20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+                        40% { transform: translate(-50%, -50%) scale(1); }
+                        100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2) translateY(-50px); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            setTimeout(() => div.remove(), 2500);
+        }
+
+        function startBlockTimer() {
+            lastBlockShiftTime = Date.now();
+
+            // Update countdown every 100ms
+            setInterval(() => {
+                const elapsed = Date.now() - lastBlockShiftTime;
+                const remaining = Math.max(0, BLOCK_TIME - elapsed);
+                const seconds = Math.ceil(remaining / 1000);
+                document.getElementById('block-countdown').textContent = `${seconds}s`;
+
+                // Progress bar effect - change color as time runs out
+                const progress = remaining / BLOCK_TIME;
+                const countdownEl = document.getElementById('block-countdown');
+                if (progress < 0.25) {
+                    countdownEl.style.color = '#ff6b6b';
+                } else if (progress < 0.5) {
+                    countdownEl.style.color = '#ffc107';
+                } else {
+                    countdownEl.style.color = '#00d4aa';
+                }
+            }, 100);
+
+            // Shift blocks every 12 seconds
+            setInterval(() => {
+                showBlockAnimation();
+                settleCurrentBatch();
+                lastBlockShiftTime = Date.now();
+            }, BLOCK_TIME);
+        }
+
+        function showBlockAnimation() {
+            // Show "NEW BLOCK" indicator
+            const div = document.createElement('div');
+            div.style.cssText = `
+                position: fixed;
+                top: 100px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 1000;
+                padding: 10px 30px;
+                background: linear-gradient(135deg, rgba(0, 212, 170, 0.9), rgba(0, 150, 120, 0.9));
+                border-radius: 30px;
+                font-size: 1.2rem;
+                font-weight: 700;
+                color: white;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                pointer-events: none;
+                animation: blockPulse 1.5s ease-out forwards;
+                box-shadow: 0 0 30px rgba(0, 212, 170, 0.5);
+            `;
+            div.innerHTML = `⬇️ NEW BLOCK - All Layers Shift Down ⬇️`;
+            document.body.appendChild(div);
+
+            // Add keyframe animation
+            if (!document.getElementById('block-pulse-style')) {
+                const style = document.createElement('style');
+                style.id = 'block-pulse-style';
+                style.textContent = `
+                    @keyframes blockPulse {
+                        0% { opacity: 0; transform: translateX(-50%) scale(0.8); }
+                        15% { opacity: 1; transform: translateX(-50%) scale(1.05); }
+                        30% { transform: translateX(-50%) scale(1); }
+                        100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            setTimeout(() => div.remove(), 1500);
+        }
+
+        function settleCurrentBatch() {
+            // Step 1: First shift ALL existing batch layers down one level
+            // This happens instantly at block time
+            shiftBatchLayers();
+
+            // Step 2: Collect all orders that were filled since last block
+            const settlingBalls = [...pendingSettledOrders];
+            pendingSettledOrders = [];
+
+            if (settlingBalls.length === 0) {
+                // Empty batch - play subtle sound
+                playBatchSettledSound(0, 0);
+                updateBatchInfo();
+                return;
+            }
+
+            let totalSurplus = 0;
+
+            // Set batch ID and txHash for the new layer 0
+            batchLayers[0].batchId = lastAuctionId || Date.now();
+            batchLayers[0].txHash = lastTxHash;
+
+            // Step 3: Animate settling balls moving from pending area to layer 0
+            settlingBalls.forEach((item, index) => {
+                const { ball, surplus } = item;
+                totalSurplus += surplus;
+
+                // Stagger the animations
+                setTimeout(() => {
+                    // Big flash effect
+                    ball.material.emissive.setHex(0x22c55e);
+                    ball.material.emissiveIntensity = 1;
+
+                    // Create particle burst effect
+                    createParticleBurst(ball.position, surplus);
+
+                    // Show individual surplus floating up
+                    if (surplus > 0) {
+                        showSurplusAnimation(ball, surplus);
+                    }
+
+                    // Move to layer 0 after flash
+                    setTimeout(() => {
+                        ball.material.emissiveIntensity = 0.15;
+                        moveBallToSettledLayer(ball, 0);
+                    }, 400);
+
+                }, index * 150); // Stagger by 150ms each
+            });
+
+            // Store total surplus on the layer
+            batchLayers[0].totalSurplus = totalSurplus;
+
+            // Add to batch history (keep last 100)
+            batchHistory.unshift({
+                batchId: batchLayers[0].batchId,
+                txHash: lastTxHash,
+                totalSurplus: totalSurplus,
+                orderCount: settlingBalls.length,
+                timestamp: Date.now()
+            });
+            if (batchHistory.length > NUM_BATCH_HISTORY) {
+                batchHistory.pop();
+            }
+
+            // Show big batch animation and play sound
+            setTimeout(() => {
+                showBigBatchSettleAnimation(totalSurplus, settlingBalls.length);
+                playBatchSettledSound(totalSurplus, settlingBalls.length);
+            }, 300);
+
+            updateBatchInfo();
+        }
+
+        function createParticleBurst(position, surplus) {
+            const particleCount = Math.min(20, Math.max(5, Math.floor(surplus / 10)));
+            const particles = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+                const material = new THREE.MeshBasicMaterial({
+                    color: surplus > 50 ? 0xffd700 : 0x22c55e,
+                    transparent: true,
+                    opacity: 1
+                });
+                const particle = new THREE.Mesh(geometry, material);
+                particle.position.copy(position);
+
+                // Random velocity
+                particle.userData.velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.5,
+                    Math.random() * 0.3 + 0.2,
+                    (Math.random() - 0.5) * 0.5
+                );
+
+                scene.add(particle);
+                particles.push(particle);
+            }
+
+            // Animate particles
+            const startTime = Date.now();
+            const duration = 1000;
+
+            function animateParticles() {
+                const elapsed = Date.now() - startTime;
+                const progress = elapsed / duration;
+
+                particles.forEach(particle => {
+                    particle.position.add(particle.userData.velocity);
+                    particle.userData.velocity.y -= 0.01; // Gravity
+                    particle.material.opacity = 1 - progress;
+                });
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateParticles);
+                } else {
+                    particles.forEach(p => scene.remove(p));
+                }
+            }
+
+            animateParticles();
+        }
+
+        function fillOrder(uid, surplus = 0) {
+            const ball = balls.get(uid);
+            if (!ball) return;
+
+            // Quick flash to indicate it's being processed
+            ball.material.emissive.setHex(0x22c55e);
+            ball.material.emissiveIntensity = 0.4;
+
+            // Add to pending settled orders - will be animated at next block
+            pendingSettledOrders.push({ ball, surplus, uid });
+
+            // Remove from active balls
+            balls.delete(uid);
+            filledCount++;
+            updateStats();
+
+            // Dim the ball to show it's "pending settlement"
+            setTimeout(() => {
+                ball.material.emissiveIntensity = 0.25;
+                ball.material.opacity = 0.7;
+            }, 200);
+        }
+
+        function expireOrder(uid) {
+            const ball = balls.get(uid);
+            if (!ball) return;
+
+            // If already falling off cliff, don't process again
+            if (ball.userData.fallingOffCliff) return;
+
+            // Flash red
+            ball.material.emissive.setHex(0xff6b6b);
+            ball.material.emissiveIntensity = 0.6;
+
+            // Play expired sound
+            playExpiredSound();
+
+            // Start the fall off the cliff
+            ball.userData.fallingOffCliff = true;
+            ball.userData.isSettled = false;
+            ball.userData.velocity = new THREE.Vector3(0.5, 0, 0);
+
+            setTimeout(() => {
+                if (balls.has(uid)) {
+                    moveBallToExpired(ball);
+                    balls.delete(uid);
+                    expiredCount++;
+                    updateStats();
+                    document.getElementById('expired-count').textContent = expiredCount;
+                }
+            }, 800);
+        }
+
+        function shiftBatchLayers() {
+            // Animate ALL layers moving down simultaneously over 1 second
+            animateAllLayersDown();
+        }
+
+        function animateAllLayersDown() {
+            const duration = 1500; // 1.5 second animation (slower)
+            const startTime = Date.now();
+
+            // NOTE: Pending balls (in `balls` Map) stay in place - they don't move!
+            // NOTE: Pending area (grid) stays completely static!
+
+            // FIRST: Map balls to their current layer indices BEFORE adding new layer
+            // This is important because balls on layer 0 need to move with layer 0 (which becomes layer 1)
+            const ballLayerMap = new Map(); // ball -> {layerIndex (after unshift), startY}
+            batchLayers.forEach((layer, index) => {
+                // After unshift, this layer will be at index+1
+                layer.balls.forEach(ball => {
+                    ballLayerMap.set(ball, {
+                        layerIndex: index + 1,  // +1 because we're about to unshift a new layer
+                        startY: ball.position.y
+                    });
+                });
+            });
+
+            // Create NEW layer 0 at the pending area position - it will animate down into place
+            const newLayer = createBatchLayerAtIndex(0);
+            // Start it at the pending area level (Y = 0), it will animate down to its proper position
+            newLayer.group.position.y = GROUND_Y;
+
+            // Insert it at the front of the array NOW (before animation)
+            batchLayers.unshift(newLayer);
+
+            // Now batchLayers has 11 elements - the new layer 0 plus the old 10 layers
+            // The last one (index 10, was index 9) will be removed
+
+            // Store starting positions and scales for all layers
+            const layerStartPositions = [];
+            const layerStartScales = [];
+            batchLayers.forEach((layer, index) => {
+                layerStartPositions.push(layer.group.position.y);
+                layerStartScales.push(layer.group.scale.x); // Current scale
+            });
+
+            // The deepest layer (now at index 10) and its balls will fade out
+            const deepestLayer = batchLayers[batchLayers.length - 1];
+            const ballsToRemove = [...deepestLayer.balls];
+
+            // Flash all layers at start
+            batchLayers.forEach(layer => {
+                layer.mesh.material.emissive = new THREE.Color(0x00d4aa);
+                layer.mesh.material.emissiveIntensity = 0.3;
+            });
+
+            function animateFrame() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(1, elapsed / duration);
+
+                // Smooth easing - ease out cubic for natural deceleration
+                const eased = 1 - Math.pow(1 - progress, 3);
+
+                // Move all LAYER GROUPS down by one LAYER_SPACING and shrink them
+                batchLayers.forEach((layer, index) => {
+                    const startY = layerStartPositions[index];
+                    const targetY = GROUND_Y - (index + 1) * LAYER_SPACING;
+                    layer.group.position.y = startY + (targetY - startY) * eased;
+
+                    // Smoothly scale down as layer moves deeper (shrink by 3% per level)
+                    const startScale = layerStartScales[index];
+                    const targetScale = 1 - (index * 0.03);
+                    const currentScale = startScale + (targetScale - startScale) * eased;
+                    layer.group.scale.set(currentScale, 1, currentScale);
+
+                    // Fade emissive as animation progresses
+                    layer.mesh.material.emissiveIntensity = 0.3 * (1 - progress);
+
+                    // Fade out the DEEPEST layer (it's disappearing off the bottom)
+                    if (index === batchLayers.length - 1) {
+                        layer.mesh.material.opacity = (0.6 - ((index - 1) * 0.04)) * (1 - progress);
+                        // Fade borders too
+                        layer.group.children.forEach(child => {
+                            if (child !== layer.mesh && child.material) {
+                                child.material.opacity = 1 - progress;
+                            }
+                        });
+                    }
+                });
+
+                // Move settled balls - keep them on their layer's surface
+                ballLayerMap.forEach((info, ball) => {
+                    const layer = batchLayers[info.layerIndex];
+                    // Ball should be at layer's current Y + ball radius
+                    ball.position.y = layer.group.position.y + ball.userData.radius;
+                });
+
+                // Pending balls stay in place! They remain on the stationary pending platform
+
+                // Fade out the deepest layer balls
+                ballsToRemove.forEach(ball => {
+                    ball.material.opacity = 0.9 * (1 - progress);
+                    ball.scale.setScalar(1 - progress * 0.5);
+                });
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateFrame);
+                } else {
+                    // Animation complete - clean up
+                    finishLayerShift(ballsToRemove);
+                }
+            }
+
+            animateFrame();
+        }
+
+        function finishLayerShift(ballsToRemove) {
+            // Remove faded balls from scene
+            ballsToRemove.forEach(ball => scene.remove(ball));
+
+            // Pop the deepest layer (index 10, the 11th element) and remove from scene
+            const oldDeepestLayer = batchLayers.pop();
+            scene.remove(oldDeepestLayer.group);
+
+            // Now we have exactly 10 layers again
+            // Update the stored Y values and opacities for all layers based on their new index
+            batchLayers.forEach((layer, index) => {
+                layer.y = GROUND_Y - (index + 1) * LAYER_SPACING;
+
+                // Update layer opacity based on new depth (10 visual layers)
+                const layerOpacity = Math.max(0.05, 0.5 - (index * 0.05));
+                layer.mesh.material.opacity = layerOpacity;
+
+                // Update border opacity (10 visual layers)
+                const borderOpacity = Math.max(0.1, 1 - (index * 0.1));
+                layer.group.children.forEach(child => {
+                    if (child !== layer.mesh && child.material) {
+                        child.material.opacity = borderOpacity;
+                    }
+                });
+            });
+
+            // Clear emissive on all layers
+            batchLayers.forEach(layer => {
+                layer.mesh.material.emissiveIntensity = 0;
+            });
+
+            updateBatchInfo();
+        }
+
+        function createBatchLayerAtIndex(index) {
+            // Create a new batch layer with the correct size for the given index
+            const layerY = GROUND_Y - (index + 1) * LAYER_SPACING;
+
+            // Create a GROUP to hold all layer elements (mesh + borders)
+            const layerGroup = new THREE.Group();
+            layerGroup.position.set(0, layerY, 0);
+
+            // Layer platform - smaller as they go deeper (10 visual layers)
+            // Also offset to the left to leave room for expired balls on the right
+            const layerSize = 65 - index * 2; // Slightly narrower
+            const layerDepth = 50 - index * 1.5;
+            const layerOffsetX = -5; // Offset to the left to leave room on right for expired balls
+            const layerGeometry = new THREE.PlaneGeometry(layerSize, layerDepth);
+
+            // Color gradient from cyan to deep blue
+            const hue = 0.5 - index * 0.02;
+            const saturation = 0.4 - index * 0.02;
+            const lightness = 0.2 - index * 0.012;
+
+            const layerMaterial = new THREE.MeshPhysicalMaterial({
+                color: new THREE.Color().setHSL(hue, saturation, lightness),
+                metalness: 0.3,
+                roughness: 0.5,
+                transparent: true,
+                opacity: 0.5 - (index * 0.03), // Fade over 10 layers
+                side: THREE.DoubleSide
+            });
+            const layerMesh = new THREE.Mesh(layerGeometry, layerMaterial);
+            layerMesh.rotation.x = -Math.PI / 2;
+            layerMesh.position.set(layerOffsetX, 0, 0);
+            layerGroup.add(layerMesh);
+
+            // Border for visibility - fade out deeper layers
+            const borderOpacity = Math.max(0.1, 1 - (index * 0.1));
+            const borderGeometry = new THREE.BoxGeometry(layerSize, 0.1, 0.1);
+            const borderMaterial = new THREE.MeshBasicMaterial({
+                color: new THREE.Color().setHSL(hue, 0.7, 0.5),
+                transparent: true,
+                opacity: borderOpacity
+            });
+            const frontBorder = new THREE.Mesh(borderGeometry, borderMaterial);
+            frontBorder.position.set(layerOffsetX, 0, layerDepth / 2);
+            layerGroup.add(frontBorder);
+
+            const backBorder = new THREE.Mesh(borderGeometry, borderMaterial);
+            backBorder.position.set(layerOffsetX, 0, -layerDepth / 2);
+            layerGroup.add(backBorder);
+
+            // Side borders
+            const sideBorderGeometry = new THREE.BoxGeometry(0.1, 0.1, layerDepth);
+            const leftBorder = new THREE.Mesh(sideBorderGeometry, borderMaterial);
+            leftBorder.position.set(layerOffsetX - layerSize / 2, 0, 0);
+            layerGroup.add(leftBorder);
+
+            const rightBorder = new THREE.Mesh(sideBorderGeometry, borderMaterial);
+            rightBorder.position.set(layerOffsetX + layerSize / 2, 0, 0);
+            layerGroup.add(rightBorder);
+
+            scene.add(layerGroup);
+
+            return {
+                group: layerGroup,
+                mesh: layerMesh,
+                y: layerY,
+                balls: [],
+                batchId: null,
+                blockNumber: null,
+                txHash: null,
+                totalSurplus: 0
+            };
+        }
+
+        function animateBallToLayerPosition(ball, layerIndex) {
+            // This is used for newly settled balls dropping from pending area to layer 0
+            const layer = batchLayers[layerIndex];
+            // Use the group's actual Y position
+            const targetY = layer.group.position.y + ball.userData.radius;
+
+            const startPos = ball.position.clone();
+            const startTime = Date.now();
+            const duration = 800;
+
+            function animate() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(1, elapsed / duration);
+
+                // Bounce easing for satisfying drop
+                let eased;
+                if (progress < 0.5) {
+                    // Fast drop
+                    eased = Math.pow(progress / 0.5, 2) * 1.15;
+                } else if (progress < 0.75) {
+                    // First bounce
+                    const bounceProgress = (progress - 0.5) / 0.25;
+                    eased = 1.15 - 0.15 * Math.sin(bounceProgress * Math.PI);
+                } else {
+                    // Settle
+                    const settleProgress = (progress - 0.75) / 0.25;
+                    eased = 1 + 0.02 * Math.sin(settleProgress * Math.PI);
+                }
+                eased = Math.min(1.02, eased);
+
+                ball.position.y = startPos.y + (targetY - startPos.y) * Math.min(1, eased);
+
+                // Adjust opacity based on layer depth
+                ball.material.opacity = Math.max(0.4, 0.9 - (layerIndex * 0.05));
+
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                }
+            }
+
+            animate();
+        }
+
+        // Get explorer URL prefix based on network
+        function getExplorerPrefix() {
+            const network = document.getElementById('network').value;
+            // Map API network names to explorer path prefixes
+            const networkMap = {
+                'mainnet': '',
+                'xdai': 'gc/',
+                'arbitrum_one': 'arb1/',
+                'base': 'base/'
+            };
+            return networkMap[network] || '';
+        }
+
+        function updateBatchInfo() {
+            const batchList = document.getElementById('batch-list');
+            let html = '';
+
+            // Use batchHistory for the list (up to 100 batches)
+            batchHistory.forEach((batch, index) => {
+                const ageMs = Date.now() - batch.timestamp;
+                const ageSeconds = Math.floor(ageMs / 1000);
+                const ageLabel = ageSeconds < 5 ? 'Just now' :
+                                ageSeconds < 60 ? `${ageSeconds}s ago` :
+                                `${Math.floor(ageSeconds / 60)}m ${ageSeconds % 60}s ago`;
+
+                // Format surplus
+                const surplusLabel = batch.totalSurplus > 0
+                    ? `+$${batch.totalSurplus.toFixed(2)}`
+                    : '';
+
+                // Build batch ID display - link to explorer if txHash available
+                let batchIdDisplay;
+                if (batch.txHash) {
+                    const explorerUrl = `https://explorer.cow.fi/${getExplorerPrefix()}tx/${batch.txHash}?tab=orders`;
+                    batchIdDisplay = `<a href="${explorerUrl}" target="_blank" class="batch-link" title="View in CoW Explorer">🔗 #${batch.batchId?.toLocaleString() || 'Batch'}</a>`;
+                } else if (batch.batchId) {
+                    batchIdDisplay = `#${batch.batchId.toLocaleString()}`;
+                } else {
+                    batchIdDisplay = `Block -${index}`;
+                }
+
+                // Fade opacity for older batches (but keep readable)
+                const opacity = Math.max(0.4, 1 - index * 0.006);
+
+                html += `
+                    <div class="batch-row" style="opacity: ${opacity}">
+                        <span class="batch-id" style="color: ${index === 0 ? '#22c55e' : '#888'}">
+                            ${batchIdDisplay}
+                        </span>
+                        <span class="batch-surplus">${surplusLabel}</span>
+                        <span class="batch-orders">${batch.orderCount}</span>
+                        <span style="color: #555; font-size: 0.7rem;">${ageLabel}</span>
+                    </div>
+                `;
+            });
+
+            // Add pending orders count
+            if (pendingSettledOrders.length > 0) {
+                html = `
+                    <div class="batch-row" style="background: rgba(34, 197, 94, 0.1); border-radius: 4px; padding: 3px 5px; margin-bottom: 5px;">
+                        <span class="batch-id" style="color: #22c55e;">⏳ Pending</span>
+                        <span class="batch-orders" style="color: #22c55e;">${pendingSettledOrders.length}</span>
+                        <span style="color: #22c55e; font-size: 0.7rem;">settling...</span>
+                    </div>
+                ` + html;
+            }
+
+            if (!html) {
+                html = '<div class="batch-row"><span class="batch-id">Waiting for orders...</span></div>';
+            }
+
+            batchList.innerHTML = html;
+        }
+
+        function clearAllBalls() {
+            balls.forEach(ball => scene.remove(ball));
+            balls.clear();
+            orderData.clear();
+            batchLayers.forEach(layer => {
+                layer.balls.forEach(ball => scene.remove(ball));
+                layer.balls = [];
+                layer.batchId = null;
+            });
+            expiredBalls.forEach(ball => scene.remove(ball));
+            expiredBalls = [];
+            batchHistory = []; // Clear batch history
+            totalVolume = 0;
+            filledCount = 0;
+            expiredCount = 0;
+            knownOrders.clear();
+            lastAuctionId = null;
+            updateStats();
+            updateBatchInfo();
+        }
+
+        let knownOrders = new Set();
+        let lastAuctionId = null;
+        let lastTxHash = null;
+
+        async function fetchOrders() {
+            const network = document.getElementById('network').value;
+
+            try {
+                const auctionRes = await fetch(`https://api.cow.fi/${network}/api/v2/solver_competition/latest`);
+                if (!auctionRes.ok) return;
+
+                const auctionData = await auctionRes.json();
+                const orderUids = auctionData.auction?.orders || [];
+
+                document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
+
+                // Track auction ID and transaction hash
+                lastAuctionId = auctionData.auctionId;
+                // Get txHash from transactionHashes array or from winning solution
+                const txHashes = auctionData.transactionHashes || [];
+                if (txHashes.length > 0) {
+                    lastTxHash = txHashes[0];
+                } else {
+                    // Try to get from winning solution
+                    const winningSolution = auctionData.solutions?.find(s => s.isWinner);
+                    lastTxHash = winningSolution?.txHash || null;
+                }
+
+                // Check for orders that are no longer in the auction (filled or expired)
+                const removedUids = [...knownOrders].filter(uid => !orderUids.includes(uid));
+
+                for (const uid of removedUids) {
+                    if (!balls.has(uid)) {
+                        knownOrders.delete(uid);
+                        continue; // Already processed
+                    }
+
+                    try {
+                        // Fetch actual order status
+                        const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                        if (orderRes.ok) {
+                            const order = await orderRes.json();
+
+                            if (order.status === 'fulfilled') {
+                                // Calculate actual surplus from executed amounts
+                                const surplus = calculateSurplusUSD(order);
+                                fillOrder(uid, surplus);
+                            } else if (order.status === 'expired' || order.status === 'cancelled') {
+                                expireOrder(uid);
+                            }
+                        }
+                    } catch (e) {
+                        // If we can't fetch, assume it was filled
+                        fillOrder(uid, 0);
+                    }
+
+                    knownOrders.delete(uid);
+                }
+
+                // Update batch info to show pending orders
+                updateBatchInfo();
+
+                // Find new orders
+                const newOrderUids = orderUids.filter(uid => !knownOrders.has(uid));
+
+                // Fetch new order details (limit batch size)
+                for (const uid of newOrderUids.slice(0, 15)) {
+                    try {
+                        const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                        if (orderRes.ok) {
+                            const order = await orderRes.json();
+                            if (order.status === 'open' && !balls.has(uid)) {
+                                createBall(order);
+                                knownOrders.add(uid);
+                            }
+                        }
+                    } catch (e) {}
+
+                    await new Promise(r => setTimeout(r, 50));
+                }
+
+                // Check for orders that disappeared (might be expired/cancelled individually)
+                const currentlyMissing = [...knownOrders].filter(uid => !orderUids.includes(uid));
+                for (const uid of currentlyMissing) {
+                    if (balls.has(uid)) {
+                        try {
+                            const orderRes = await fetch(`https://api.cow.fi/${network}/api/v1/orders/${uid}`);
+                            if (orderRes.ok) {
+                                const order = await orderRes.json();
+                                if (order.status === 'fulfilled') {
+                                    const surplus = calculateSurplusUSD(order);
+                                    fillOrder(uid, surplus);
+                                } else if (order.status === 'expired' || order.status === 'cancelled') {
+                                    expireOrder(uid);
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                    knownOrders.delete(uid);
+                }
+
+                updateStats();
+
+            } catch (error) {
+                console.error('Error fetching orders:', error);
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('pending-orders').textContent = balls.size;
+            document.getElementById('filled-orders').textContent = filledCount;
+            document.getElementById('expired-orders').textContent = expiredCount;
+            document.getElementById('total-volume').textContent = totalVolume > 1000000
+                ? `$${(totalVolume / 1000000).toFixed(1)}M`
+                : totalVolume > 1000
+                    ? `$${(totalVolume / 1000).toFixed(1)}K`
+                    : `$${totalVolume.toFixed(0)}`;
+        }
+
+        // Fetch missing txHashes for batches that have a batchId but no txHash
+        async function fetchMissingTxHashes() {
+            const network = document.getElementById('network').value;
+            let updated = false;
+
+            // Check batch history for missing txHashes (only first 20 to limit API calls)
+            for (const batch of batchHistory.slice(0, 20)) {
+                if (batch.batchId && !batch.txHash) {
+                    try {
+                        const res = await fetch(`https://api.cow.fi/${network}/api/v2/solver_competition/${batch.batchId}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const txHashes = data.transactionHashes || [];
+                            if (txHashes.length > 0) {
+                                batch.txHash = txHashes[0];
+                                updated = true;
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore errors
+                    }
+                }
+            }
+
+            if (updated) {
+                updateBatchInfo();
+            }
+        }
+
+        // Fetch missing txHashes every 5 seconds
+        setInterval(fetchMissingTxHashes, 5000);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const allBalls = [...balls.values()];
+            batchLayers.forEach(layer => allBalls.push(...layer.balls));
+            allBalls.push(...expiredBalls);
+            const intersects = raycaster.intersectObjects(allBalls);
+
+            // Reset highlights
+            [...balls.values(), ...expiredBalls].forEach(ball => {
+                if (ball !== selectedBall) {
+                    ball.material.emissiveIntensity = 0.15;
+                }
+            });
+            batchLayers.forEach(layer => {
+                layer.balls.forEach(ball => {
+                    if (ball !== selectedBall) {
+                        ball.material.emissiveIntensity = 0.15;
+                    }
+                });
+            });
+
+            if (intersects.length > 0) {
+                const ball = intersects[0].object;
+                ball.material.emissiveIntensity = 0.5;
+                renderer.domElement.style.cursor = 'pointer';
+            } else {
+                renderer.domElement.style.cursor = 'grab';
+            }
+        }
+
+        function onMouseClick(event) {
+            raycaster.setFromCamera(mouse, camera);
+            const allBalls = [...balls.values()];
+            batchLayers.forEach(layer => allBalls.push(...layer.balls));
+            allBalls.push(...expiredBalls);
+            const intersects = raycaster.intersectObjects(allBalls);
+
+            if (intersects.length > 0) {
+                selectBall(intersects[0].object);
+            }
+        }
+
+        function selectBall(ball) {
+            if (selectedBall) {
+                selectedBall.material.emissiveIntensity = 0.15;
+            }
+
+            selectedBall = ball;
+            ball.material.emissiveIntensity = 0.7;
+
+            const order = orderData.get(ball.userData.uid);
+            if (order) {
+                showOrderDetails(order, ball.userData.area);
+            }
+        }
+
+        function showOrderDetails(order, area) {
+            const sellToken = getTokenInfo(order.sellToken);
+            const buyToken = getTokenInfo(order.buyToken);
+            const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellToken.decimals);
+            const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyToken.decimals);
+            const usdValue = sellAmount * sellToken.price;
+            const orderClass = getOrderClass(order);
+            const explorerPrefix = getExplorerPrefix();
+
+            const statusLabel = area === 'expired' ? '<span style="color: #ff6b6b;">EXPIRED</span>' :
+                               area === 'settled' ? '<span style="color: #22c55e;">FILLED</span>' :
+                               '<span style="color: #00d4aa;">PENDING</span>';
+
+            const content = `
+                <div class="token-pair-display">
+                    <span class="sell">${sellAmount.toFixed(4)} ${sellToken.symbol}</span>
+                    <span class="arrow">→</span>
+                    <span class="buy">${buyAmount.toFixed(4)} ${buyToken.symbol}</span>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Status</div>
+                    <div class="order-detail-value">${statusLabel}</div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">USD Value</div>
+                    <div class="order-detail-value highlight">$${usdValue.toLocaleString(undefined, {maximumFractionDigits: 2})}</div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Order Type</div>
+                    <div class="order-detail-value">${order.kind} / ${orderClass}</div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Owner</div>
+                    <div class="order-detail-value">
+                        <a href="https://explorer.cow.fi/${explorerPrefix}address/${order.owner}" target="_blank">
+                            ${order.owner.slice(0, 10)}...${order.owner.slice(-8)}
+                        </a>
+                    </div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Order ID</div>
+                    <div class="order-detail-value">
+                        <a href="https://explorer.cow.fi/${explorerPrefix}orders/${order.uid}" target="_blank">
+                            ${order.uid.slice(0, 20)}...
+                        </a>
+                    </div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Created</div>
+                    <div class="order-detail-value">${new Date(order.creationDate).toLocaleString()}</div>
+                </div>
+
+                <div class="order-detail">
+                    <div class="order-detail-label">Expires</div>
+                    <div class="order-detail-value">${new Date(order.validTo * 1000).toLocaleString()}</div>
+                </div>
+            `;
+
+            document.getElementById('order-details-content').innerHTML = content;
+            document.getElementById('order-panel').classList.add('open');
+        }
+
+        function closeOrderPanel() {
+            document.getElementById('order-panel').classList.remove('open');
+            if (selectedBall) {
+                selectedBall.material.emissiveIntensity = 0.15;
+                selectedBall = null;
+            }
+        }
+
+        let lastColorUpdateTime = 0;
+        const COLOR_UPDATE_INTERVAL = 1000; // Update colors every second when in time mode
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            updatePhysics();
+            updateExpiredBalls(); // Update falling expired balls
+            controls.update();
+
+            // Rotate pending balls slightly
+            balls.forEach(ball => {
+                if (!ball.userData.isSettled && !ball.userData.fallingOffCliff) {
+                    ball.rotation.x += 0.006;
+                    ball.rotation.y += 0.008;
+                }
+            });
+
+            // Rotate expired balls as they fall
+            expiredBalls.forEach(ball => {
+                ball.rotation.x += 0.01;
+                ball.rotation.y += 0.015;
+            });
+
+            // Update colors periodically when in time mode (colors change as orders age)
+            const now = Date.now();
+            if (colorMode === 'time' && now - lastColorUpdateTime > COLOR_UPDATE_INTERVAL) {
+                updateAllBallColors();
+                lastColorUpdateTime = now;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Initialize
+        init();
+
+        // Hide expiry mode elements since it's off by default
+        expiryModeElements.forEach(element => {
+            element.visible = false;
+        });
+    </script>
+</body>
+</html>

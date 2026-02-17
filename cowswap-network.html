@@ -1,0 +1,2987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoW Protocol - Token Network View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a1a;
+            color: #fff;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            overflow: hidden;
+        }
+        #header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(10, 10, 26, 0.9);
+            border-bottom: 1px solid #1a1a2e;
+            z-index: 100;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .logo h1 {
+            font-size: 1.4rem;
+            color: #00d4aa;
+        }
+        .logo span {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .stats {
+            display: flex;
+            gap: 30px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #00d4aa;
+        }
+        .stat-label {
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        select, button {
+            background: #1a1a2e;
+            color: #fff;
+            border: 1px solid #333;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        select:hover, button:hover {
+            border-color: #00d4aa;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            padding-top: 70px;
+        }
+        canvas {
+            display: block;
+        }
+        #tooltip {
+            position: fixed;
+            background: rgba(20, 20, 40, 0.95);
+            border: 1px solid #00d4aa;
+            border-radius: 8px;
+            padding: 12px 16px;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+            max-width: 350px;
+        }
+        .tooltip-title {
+            font-weight: 600;
+            color: #00d4aa;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+        .tooltip-subtitle {
+            color: #888;
+            font-size: 0.75rem;
+            margin-bottom: 8px;
+            font-family: monospace;
+        }
+        .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            font-size: 0.85rem;
+            margin: 4px 0;
+        }
+        .tooltip-label {
+            color: #888;
+        }
+        .tooltip-value {
+            color: #fff;
+        }
+        .tooltip-price {
+            color: #22c55e;
+            font-weight: 600;
+        }
+        .tooltip-category {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            margin-top: 5px;
+        }
+        .category-stable { background: #22c55e33; color: #22c55e; }
+        .category-eth { background: #8b5cf633; color: #8b5cf6; }
+        .category-other { background: #f9731633; color: #f97316; }
+        canvas { cursor: grab; }
+        canvas.dragging { cursor: grabbing; }
+        #legend {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(20, 20, 40, 0.95);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 100;
+        }
+        .legend-title {
+            font-size: 0.8rem;
+            color: #00d4aa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.8rem;
+            margin: 5px 0;
+            color: #888;
+        }
+        .legend-line {
+            width: 40px;
+            height: 4px;
+            background: linear-gradient(90deg, #3b82f6 0%, #3b82f6 30%, #93c5fd 70%, #93c5fd 100%);
+            border-radius: 2px;
+        }
+        .legend-line.thin {
+            height: 2px;
+        }
+        .legend-line.thick {
+            height: 8px;
+        }
+        .legend-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+        }
+        .legend-category {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 4px 0;
+        }
+        .cat-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        #info-panel {
+            position: fixed;
+            right: 20px;
+            top: 90px;
+            background: rgba(20, 20, 40, 0.95);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            width: 280px;
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+            z-index: 100;
+        }
+        .panel-title {
+            font-size: 0.8rem;
+            color: #00d4aa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .token-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .token-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            background: rgba(0, 212, 170, 0.05);
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .token-symbol {
+            font-weight: 600;
+            color: #fff;
+        }
+        .token-volume {
+            color: #00d4aa;
+        }
+        .token-price {
+            color: #888;
+            font-size: 0.75rem;
+        }
+        #order-panel {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(20, 20, 40, 0.98);
+            border: 1px solid #00d4aa;
+            border-radius: 12px;
+            padding: 20px;
+            width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            z-index: 200;
+            display: none;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        #order-panel.visible {
+            display: block;
+        }
+        .order-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .order-panel-title {
+            font-size: 1.1rem;
+            color: #00d4aa;
+        }
+        .order-panel-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0 5px;
+        }
+        .order-panel-close:hover {
+            color: #fff;
+        }
+        .order-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .order-item {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 10px;
+            padding: 12px;
+            background: rgba(0, 212, 170, 0.05);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            align-items: center;
+        }
+        .order-item:hover {
+            background: rgba(0, 212, 170, 0.1);
+        }
+        .order-amounts {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .order-sell {
+            color: #f97316;
+        }
+        .order-buy {
+            color: #22c55e;
+        }
+        .order-price {
+            color: #fff;
+            font-weight: 600;
+            text-align: center;
+        }
+        .order-link {
+            color: #00d4aa;
+            text-decoration: none;
+            padding: 6px 12px;
+            border: 1px solid #00d4aa;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+        }
+        .order-link:hover {
+            background: #00d4aa;
+            color: #000;
+        }
+        .order-panel-summary {
+            color: #888;
+            font-size: 0.8rem;
+            margin-bottom: 10px;
+        }
+        #order-panel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 199;
+            display: none;
+        }
+        #order-panel-overlay.visible {
+            display: block;
+        }
+        .panel-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        .panel-tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .panel-tab:hover {
+            color: #fff;
+        }
+        .panel-tab.active {
+            color: #00d4aa;
+            border-bottom-color: #00d4aa;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        #depth-chart-container {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            margin-bottom: 15px;
+        }
+        #depth-chart {
+            width: 100%;
+            height: 100%;
+            background: #0a0a1a;
+            border-radius: 8px;
+        }
+        .depth-chart-info {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            pointer-events: none;
+        }
+        .depth-mid-price {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        .depth-mid-label {
+            font-size: 0.75rem;
+            color: #888;
+        }
+        .depth-legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 10px;
+            font-size: 0.8rem;
+        }
+        .depth-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .depth-legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        .depth-legend-dot.bids {
+            background: #22c55e;
+        }
+        .depth-legend-dot.asks {
+            background: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <div class="logo">
+            <h1>CoW Token Network</h1>
+            <span>Real-time order flow visualization</span>
+        </div>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value" id="auction-id">-</div>
+                <div class="stat-label">Auction</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="order-count">0</div>
+                <div class="stat-label">Orders</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="total-volume">$0</div>
+                <div class="stat-label">Volume</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="token-count">0</div>
+                <div class="stat-label">Tokens</div>
+            </div>
+        </div>
+        <div class="controls">
+            <select id="network">
+                <option value="mainnet">Ethereum</option>
+                <option value="xdai">Gnosis</option>
+                <option value="arbitrum_one">Arbitrum</option>
+                <option value="base">Base</option>
+                <option value="bsc">BNB Chain</option>
+            </select>
+            <button id="layout-toggle" onclick="toggleLayout()">Circle View</button>
+            <button onclick="resetView()">Reset View</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <div id="legend">
+        <div class="legend-title">Order Flow</div>
+        <div class="legend-item">
+            <div class="legend-line thick"></div>
+            <span>High volume</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line"></div>
+            <span>Medium volume</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-line thin"></div>
+            <span>Low volume</span>
+        </div>
+        <div class="legend-section">
+            <div class="legend-title">Token Categories</div>
+            <div class="legend-category">
+                <div class="cat-dot" style="background: #22c55e;"></div>
+                <span>Stablecoins</span>
+            </div>
+            <div class="legend-category">
+                <div class="cat-dot" style="background: #8b5cf6;"></div>
+                <span>ETH & Derivatives</span>
+            </div>
+            <div class="legend-category">
+                <div class="cat-dot" style="background: #f97316;"></div>
+                <span>Other Tokens</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="info-panel">
+        <div class="panel-title">Top Tokens by Volume</div>
+        <div class="token-list" id="token-list">
+            <div class="token-item">
+                <span class="token-symbol">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="order-panel-overlay" onclick="closeOrderPanel()"></div>
+    <div id="order-panel">
+        <div class="order-panel-header">
+            <span class="order-panel-title" id="order-panel-title">Orders</span>
+            <button class="order-panel-close" onclick="closeOrderPanel()">&times;</button>
+        </div>
+        <div class="order-panel-summary" id="order-panel-summary"></div>
+        <div class="panel-tabs">
+            <button class="panel-tab active" onclick="switchTab('depth')">Depth Chart</button>
+            <button class="panel-tab" onclick="switchTab('orders')">Order List</button>
+        </div>
+        <div id="tab-depth" class="tab-content active">
+            <div id="depth-chart-container">
+                <canvas id="depth-chart"></canvas>
+                <div class="depth-chart-info">
+                    <div class="depth-mid-price" id="depth-mid-price">-</div>
+                    <div class="depth-mid-label">Mid Market Price</div>
+                </div>
+            </div>
+            <div class="depth-legend">
+                <div class="depth-legend-item">
+                    <div class="depth-legend-dot bids"></div>
+                    <span>Bids (buy orders from reverse direction)</span>
+                </div>
+                <div class="depth-legend-item">
+                    <div class="depth-legend-dot asks"></div>
+                    <span>Asks (sell orders)</span>
+                </div>
+            </div>
+        </div>
+        <div id="tab-orders" class="tab-content">
+            <div class="order-list" id="order-list"></div>
+        </div>
+    </div>
+
+    <script>
+        // Token categories
+        const STABLECOINS = new Set([
+            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
+            '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
+            '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
+            '0x4fabb145d64652a948d72533023f6e7a623c7c53', // BUSD
+            '0x8e870d67f660d95d5be530380d0ec0bd388289e1', // PAX/USDP
+            '0x0000000000085d4780b73119b644ae5ecd22b376', // TUSD
+            '0x056fd409e1d7a124bd7017459dfea2f387b6d5cd', // GUSD
+            '0x57ab1ec28d129707052df4df418d58a2d46d5f51', // sUSD
+            '0x853d955acef822db058eb8505911ed77f175b99e', // FRAX
+            '0x5f98805a4e8be255a32880fdec7f6728c6568ba0', // LUSD
+            '0x1a7e4e63778b4f12a199c062f3efdd288afcbce8', // agEUR
+            '0x99d8a9c45b2eca8864373a26d1459e3dff1e17f3', // MIM
+            '0xdf3ac4f479375802a821f7b7b46cd7eb5e4262cc', // eUSD
+            '0x1456688345527be1f37e9e627da0837d6f08c925', // USDP (Pax Dollar)
+            '0xf939e0a03fb07f59a73314e73794be0e57ac1b4e', // crvUSD
+            '0x83f20f44975d03b1b09e64809b757c47f942beea', // sDAI
+            '0x4c9edd5852cd905f086c759e8383e09bff1e68b3', // USDe (Ethena)
+            '0x9d39a5de30e57443bff2a8307a4256c8797a3497', // sUSDe (staked USDe)
+            '0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f', // GHO (Aave)
+            '0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5', // USD0 (Usual)
+            '0x35d8949372d46b7a3d5a56006ae77b215fc69bc0', // USD0++ (Usual staked)
+            '0x866a2bf4e572cbcf37d5071a7a58503bfb36be1b', // USD1 (World Liberty)
+            '0x0c10bf8fcb7bf5412187a595ab97a3609160b5c6', // USDD (Tron)
+            '0xe00bd3df25fb187d6abbb620b3dfd669dc949a6', // USD++
+            '0xa663b02cf0a4b149d2ad41910cb81e23e1c41c32', // sFRAX
+            '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', // USDC (Polygon native)
+            '0x7c9f4c87d911613fe9ca58b579f737911aad2d43', // FRAX (new)
+            // Gnosis
+            '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d', // WXDAI
+            '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83', // USDC on Gnosis
+            '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0', // USDC.e on Gnosis (bridged)
+            '0x4ecaba5870353805a9f068101a40e0f32ed605c6', // USDT on Gnosis
+            // Arbitrum
+            '0xaf88d065e77c8cc2239327c5edb3a432268e5831', // USDC on Arbitrum
+            '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8', // USDC.e on Arbitrum
+            '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', // USDT on Arbitrum
+            '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1', // DAI on Arbitrum
+            // Base
+            '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC on Base
+            '0x50c5725949a6f0c72e6c4a641f24049a917db0cb', // DAI on Base
+        ]);
+
+        // Patterns for detecting stablecoins by symbol name
+        const STABLECOIN_PATTERNS = [
+            /^USD[A-Z0-9+.]*$/i,  // USD, USDC, USDT, USDe, USD0, USD1, USD++, USDC.e, etc.
+            /^[a-z]?USD[A-Z0-9.]*$/i,  // sUSD, crvUSD, aUSD, etc.
+            /^DAI$/i,
+            /^[a-z]DAI$/i,  // sDAI, etc.
+            /^FRAX$/i,
+            /^[a-z]FRAX$/i,  // sFRAX
+            /^GHO$/i,
+            /^LUSD$/i,
+            /^BUSD$/i,
+            /^TUSD$/i,
+            /^GUSD$/i,
+            /^USDP$/i,
+            /^PAX$/i,
+            /^MIM$/i,
+            /^DOLA$/i,
+            /^EURC?$/i,  // EUR, EURC
+            /^agEUR$/i,
+            /^EURS$/i,
+            /^WXDAI$/i,
+            /^XDAI$/i,
+        ];
+
+        const ETH_DERIVATIVES = new Set([
+            '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // Native ETH (placeholder address)
+            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // WETH
+            '0xae7ab96520de3a18e5e111b5eaab095312d7fe84', // stETH
+            '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0', // wstETH
+            '0xbe9895146f7af43049ca1c1ae358b0541ea49704', // cbETH
+            '0xae78736cd615f374d3085123a210448e74fc6393', // rETH
+            '0xac3e018457b222d93114458476f3e3416abbe38f', // sfrxETH
+            '0x5e8422345238f34275888049021821e8e08caa1f', // frxETH
+            '0xf1c9acdc66974dfb6decb12aa385b9cd01190e38', // osETH
+            '0xa35b1b31ce002fbf2058d22f30f95d405200a15b', // ETHx
+            '0xfe2e637202056d30016725477c5da089ab0a043a', // sETH2
+            '0x9559aaa82d9649c7a7b220e7c461d2e74c9a3593', // rETH (old)
+            '0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee', // weETH
+            '0x35fa164735182de50811e8e2e824cfb9b6118ac2', // eETH
+            '0xbf5495efe5db9ce00f80364c8b423567e58d2110', // ezETH
+            '0xd5f7838f5c461feff7fe49ea5ebaf7728bb0adfa', // mETH
+            '0x856c4efb76c1d1ae02e20ceb03a2a6a08b0b8dc3', // OETH
+            '0xfae103dc9cf190ed75350761e95403b7b8afa6c0', // rswETH
+            '0xa2e3356610840701bdf5611a53974510ae27e2e1', // wBETH
+            '0x04c154b66cb340f3ae24111cc767e0184ed00cc6', // pxETH
+            '0x9ba021b0a9b958b5e75ce9f6dff97c7ee52cb3e6', // apxETH
+            // Gnosis
+            '0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1', // WETH on Gnosis
+            // Arbitrum
+            '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', // WETH on Arbitrum
+            '0x5979d7b546e38e414f7e9822514be443a4800529', // wstETH on Arbitrum
+            // Base
+            '0x4200000000000000000000000000000000000006', // WETH on Base
+            '0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452', // wstETH on Base
+        ]);
+
+        // Patterns for detecting ETH derivatives by symbol name
+        const ETH_DERIVATIVE_PATTERNS = [
+            /^W?ETH$/i,      // ETH, WETH
+            /^[a-z]{1,3}ETH$/i,  // stETH, cbETH, rETH, frxETH, osETH, eETH, mETH, etc.
+            /^ETH[a-z]$/i,   // ETHx
+            /^[a-z]{1,2}ETH2?$/i,  // sETH2
+        ];
+
+        // Known token info (fallback)
+        const KNOWN_TOKENS = {
+            '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': { symbol: 'ETH', decimals: 18 }, // Native ETH
+            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
+            '0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+            '0x6b175474e89094c44da98b954eedeac495271d0f': { symbol: 'DAI', decimals: 18 },
+            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': { symbol: 'WETH', decimals: 18 },
+            '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': { symbol: 'WBTC', decimals: 8 },
+            '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0': { symbol: 'wstETH', decimals: 18 },
+            '0xae7ab96520de3a18e5e111b5eaab095312d7fe84': { symbol: 'stETH', decimals: 18 },
+            '0xae78736cd615f374d3085123a210448e74fc6393': { symbol: 'rETH', decimals: 18 },
+            '0xbe9895146f7af43049ca1c1ae358b0541ea49704': { symbol: 'cbETH', decimals: 18 },
+            '0xdef1ca1fb7fbcdc777520aa7f396b4e015f497ab': { symbol: 'COW', decimals: 18 },
+            '0x6982508145454ce325ddbe47a25d4ec3d2311933': { symbol: 'PEPE', decimals: 18 },
+            '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce': { symbol: 'SHIB', decimals: 18 },
+            '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984': { symbol: 'UNI', decimals: 18 },
+            '0x514910771af9ca656af840dff83e8264ecf986ca': { symbol: 'LINK', decimals: 18 },
+            '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9': { symbol: 'AAVE', decimals: 18 },
+            '0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2': { symbol: 'MKR', decimals: 18 },
+            '0xd533a949740bb3306d119cc777fa900ba034cd52': { symbol: 'CRV', decimals: 18 },
+            '0xba100000625a3754423978a60c9317c58a424e3d': { symbol: 'BAL', decimals: 18 },
+            '0x5a98fcbea516cf06857215779fd812ca3bef1b32': { symbol: 'LDO', decimals: 18 },
+            '0x853d955acef822db058eb8505911ed77f175b99e': { symbol: 'FRAX', decimals: 18 },
+            '0xc00e94cb662c3520282e6f5717214004a7f26888': { symbol: 'COMP', decimals: 18 },
+            '0x4fabb145d64652a948d72533023f6e7a623c7c53': { symbol: 'BUSD', decimals: 18 },
+            '0x8e870d67f660d95d5be530380d0ec0bd388289e1': { symbol: 'USDP', decimals: 18 },
+            '0x0000000000085d4780b73119b644ae5ecd22b376': { symbol: 'TUSD', decimals: 18 },
+            '0x056fd409e1d7a124bd7017459dfea2f387b6d5cd': { symbol: 'GUSD', decimals: 2 },
+            '0x57ab1ec28d129707052df4df418d58a2d46d5f51': { symbol: 'sUSD', decimals: 18 },
+            '0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3': { symbol: 'ONDO', decimals: 18 },
+            '0x15d4c048f83bd7e37d49ea4c83a07267ec4203da': { symbol: 'GALA', decimals: 8 },
+            '0x111111111117dc0aa78b770fa6a738034120c302': { symbol: '1INCH', decimals: 18 },
+            '0xc944e90c64b2c07662a292be6244bdf05cda44a7': { symbol: 'GRT', decimals: 18 },
+            '0x0f5d2fb29fb7d3cfee444a200298f468908cc942': { symbol: 'MANA', decimals: 18 },
+            '0x4d224452801aced8b2f0aebe155379bb5d594381': { symbol: 'APE', decimals: 18 },
+            '0x3845badade8e6dff049820680d1f14bd3903a5d0': { symbol: 'SAND', decimals: 18 },
+            '0x75231f58b43240c9718dd58b4967c5114342a86c': { symbol: 'OKB', decimals: 18 },
+            '0x0d8775f648430679a709e98d2b0cb6250d2887ef': { symbol: 'BAT', decimals: 18 },
+            '0xe41d2489571d322189246dafa5ebde1f4699f498': { symbol: 'ZRX', decimals: 18 },
+            '0xc18360217d8f7ab5e7c516566761ea12ce7f9d72': { symbol: 'ENS', decimals: 18 },
+            '0x6de037ef9ad2725eb40118bb1702ebb27e4aeb24': { symbol: 'RNDR', decimals: 18 },
+            '0x582d872a1b094fc48f5de31d3b73f2d9be47def1': { symbol: 'TON', decimals: 9 },
+            '0x4a220e6096b25eadb88358cb44068a3248254675': { symbol: 'QNT', decimals: 18 },
+            '0x58b6a8a3302369daec383334672404ee733ab239': { symbol: 'LPT', decimals: 18 },
+            '0x320623b8e4ff03373931769a31fc52a4e78b5d70': { symbol: 'RSR', decimals: 18 },
+            '0xbbbbca6a901c926f240b89eacb641d8aec7aeafd': { symbol: 'LRC', decimals: 18 },
+            '0x3472a5a71965499acd81997a54bba8d852c6e53d': { symbol: 'BADGER', decimals: 18 },
+            '0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e': { symbol: 'YFI', decimals: 18 },
+            '0x92d6c1e31e14520e676a687f0a93788b716beff5': { symbol: 'DYDX', decimals: 18 },
+            '0x6810e776880c02933d47db1b9fc05908e5386b96': { symbol: 'GNO', decimals: 18 },
+            '0xc5fb36dd2fb59d3b98deff88425a3f425ee469ed': { symbol: 'TBTC', decimals: 18 },
+            '0x9d65ff81a3c488d585bbfb0bfe3c7707c7917f54': { symbol: 'SSV', decimals: 18 },
+            '0xf1ca9cb74685755965c7458528a36934df52a3ef': { symbol: 'AURA', decimals: 18 },
+            '0xd1d2eb1b1e90b638588728b4130137d262c87cae': { symbol: 'GALA', decimals: 8 },
+            '0x5283d291dbcf85356a21ba090e6db59121208b44': { symbol: 'BLUR', decimals: 18 },
+            '0x6123b0049f904d730db3c36a31167d9d4121fa6b': { symbol: 'RBN', decimals: 18 },
+            '0x4e3fbd56cd56c3e72c1403e103b45db9da5b9d2b': { symbol: 'CVX', decimals: 18 },
+            '0xd31a59c85ae9d8edefec411d448f90841571b89c': { symbol: 'SOL', decimals: 9 },
+            '0x8457ca5040ad67fdebbcc8edce889a335bc0fbfb': { symbol: 'ALT', decimals: 18 },
+            '0x5f98805a4e8be255a32880fdec7f6728c6568ba0': { symbol: 'LUSD', decimals: 18 },
+            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
+            '0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+            '0xa0b73e1ff0b80914ab6fe0444e65848c4c34450b': { symbol: 'CRO', decimals: 8 },
+            '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39': { symbol: 'HEX', decimals: 8 },
+            '0x4c11249814f11b9346808179cf06e71ac328c1b5': { symbol: 'ORAI', decimals: 18 },
+            '0xb23d80f5fefcddaa212212f028021b41ded428cf': { symbol: 'PRIME', decimals: 18 },
+            '0xf57e7e7c23978c3caec3c3548e3d615c346e79ff': { symbol: 'IMX', decimals: 18 },
+            '0x50d1c9771902476076ecfc8b2a83ad6b9355a4c9': { symbol: 'FTT', decimals: 18 },
+            '0x090185f2135308bad17527004364ebcc2d37e5f6': { symbol: 'SPELL', decimals: 18 },
+            '0x99d8a9c45b2eca8864373a26d1459e3dff1e17f3': { symbol: 'MIM', decimals: 18 },
+            '0xac3e018457b222d93114458476f3e3416abbe38f': { symbol: 'sfrxETH', decimals: 18 },
+            '0x5e8422345238f34275888049021821e8e08caa1f': { symbol: 'frxETH', decimals: 18 },
+            '0xa663b02cf0a4b149d2ad41910cb81e23e1c41c32': { symbol: 'sFRAX', decimals: 18 },
+            '0xf939e0a03fb07f59a73314e73794be0e57ac1b4e': { symbol: 'crvUSD', decimals: 18 },
+            '0x83f20f44975d03b1b09e64809b757c47f942beea': { symbol: 'sDAI', decimals: 18 },
+            '0x7a56e1c57c7475ccf742a1832b028f0456652f97': { symbol: 'SXP', decimals: 18 },
+            '0xd33526068d116ce69f19a9ee46f0bd304f21a51f': { symbol: 'RPL', decimals: 18 },
+            '0xcdf7028ceab81fa0c6971208e83fa7872994bee5': { symbol: 'T', decimals: 18 },
+            '0xaea46a60368a7bd060eec7df8cba43b7ef41ad85': { symbol: 'FET', decimals: 18 },
+            '0xbb0e17ef65f82ab018d8edd776e8dd940327b28b': { symbol: 'AXS', decimals: 18 },
+            '0x4d224452801aced8b2f0aebe155379bb5d594381': { symbol: 'APE', decimals: 18 },
+            '0x3593d125a4f7849a1b059e64f4517a86dd60c95d': { symbol: 'OMI', decimals: 18 },
+            '0x5a98fcbea516cf06857215779fd812ca3bef1b32': { symbol: 'LDO', decimals: 18 },
+            '0xcb84d72e61e383767c4dfeb2d8ff7f4fb89abc6e': { symbol: 'VEGA', decimals: 18 },
+            '0x808507121b80c02388fad14726482e061b8da827': { symbol: 'PENDLE', decimals: 18 },
+            '0x18084fba666a33d37592fa2633fd49a74dd93a88': { symbol: 'tBTC', decimals: 18 },
+            '0xfe0c30065b384f05761f15d0cc899d4f9f9cc0eb': { symbol: 'ether.fi', decimals: 18 },
+            '0x35fa164735182de50811e8e2e824cfb9b6118ac2': { symbol: 'eETH', decimals: 18 },
+            '0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee': { symbol: 'weETH', decimals: 18 },
+            '0xa35b1b31ce002fbf2058d22f30f95d405200a15b': { symbol: 'ETHx', decimals: 18 },
+            '0xf1c9acdc66974dfb6decb12aa385b9cd01190e38': { symbol: 'osETH', decimals: 18 },
+            '0xbf5495efe5db9ce00f80364c8b423567e58d2110': { symbol: 'ezETH', decimals: 18 },
+            '0xd5f7838f5c461feff7fe49ea5ebaf7728bb0adfa': { symbol: 'mETH', decimals: 18 },
+            '0x856c4efb76c1d1ae02e20ceb03a2a6a08b0b8dc3': { symbol: 'OETH', decimals: 18 },
+            '0xfae103dc9cf190ed75350761e95403b7b8afa6c0': { symbol: 'rswETH', decimals: 18 },
+            '0xa2e3356610840701bdf5611a53974510ae27e2e1': { symbol: 'wBETH', decimals: 18 },
+            '0xc3d03e4f041fd4cd388c549ee2a29a9e5075882f': { symbol: 'sLP-DAI', decimals: 18 },
+            '0x04c154b66cb340f3ae24111cc767e0184ed00cc6': { symbol: 'pxETH', decimals: 18 },
+            '0x9ba021b0a9b958b5e75ce9f6dff97c7ee52cb3e6': { symbol: 'apxETH', decimals: 18 },
+            '0x004626a008b1acdc4c74ab51644093b155e59a23': { symbol: 'stFlip', decimals: 18 },
+            // New stablecoins
+            '0x4c9edd5852cd905f086c759e8383e09bff1e68b3': { symbol: 'USDe', decimals: 18 },
+            '0x9d39a5de30e57443bff2a8307a4256c8797a3497': { symbol: 'sUSDe', decimals: 18 },
+            '0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f': { symbol: 'GHO', decimals: 18 },
+            '0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5': { symbol: 'USD0', decimals: 18 },
+            '0x35d8949372d46b7a3d5a56006ae77b215fc69bc0': { symbol: 'USD0++', decimals: 18 },
+            '0x866a2bf4e572cbcf37d5071a7a58503bfb36be1b': { symbol: 'USD1', decimals: 18 },
+            '0x0c10bf8fcb7bf5412187a595ab97a3609160b5c6': { symbol: 'USDD', decimals: 18 },
+            '0xdefa4e8a7bcba345f687a2f1456f5edd9ce97202': { symbol: 'KNC', decimals: 18 },
+            '0x1456688345527be1f37e9e627da0837d6f08c925': { symbol: 'USDP', decimals: 18 },
+            // Gnosis
+            '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d': { symbol: 'WXDAI', decimals: 18 },
+            '0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1': { symbol: 'WETH', decimals: 18 },
+            '0x9c58bacc331c9aa871afd802db6379a98e80cedb': { symbol: 'GNO', decimals: 18 },
+            '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83': { symbol: 'USDC', decimals: 6 },
+            '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0': { symbol: 'USDC.e', decimals: 6 },
+            '0x4ecaba5870353805a9f068101a40e0f32ed605c6': { symbol: 'USDT', decimals: 6 },
+            // Arbitrum
+            '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': { symbol: 'WETH', decimals: 18 },
+            '0xaf88d065e77c8cc2239327c5edb3a432268e5831': { symbol: 'USDC', decimals: 6 },
+            '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8': { symbol: 'USDC.e', decimals: 6 },
+            '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT', decimals: 6 },
+            '0x5979d7b546e38e414f7e9822514be443a4800529': { symbol: 'wstETH', decimals: 18 },
+            // Base
+            '0x4200000000000000000000000000000000000006': { symbol: 'WETH', decimals: 18 },
+            '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6 },
+            '0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452': { symbol: 'wstETH', decimals: 18 },
+        };
+
+        // Dynamic token info cache (fetched from API)
+        let tokenInfoCache = new Map();
+        let tokenPriceCache = new Map();
+
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, centerX, centerY, radius;
+
+        // Data
+        let tokens = new Map(); // address -> {symbol, totalSellVolume, totalBuyVolume, orders, category}
+        let orders = new Map(); // uid -> order data
+        let edges = new Map(); // "sellToken-buyToken" -> {sellVolume, buyVolume, orders}
+        let tokenPositions = new Map(); // address -> {x, y, vx, vy, angle, targetAngle, size}
+
+        // Animation & Physics
+        let hoveredToken = null;
+        let hoveredEdge = null;
+        let draggedToken = null;
+        let draggedPole = null;  // Track which pole is being dragged
+        let isDragging = false;
+        let physicsEnabled = true;
+        let animationFrameId = null;
+
+        // Layout mode: 'poles' (3 category clusters) or 'circle' (single circle)
+        let layoutMode = 'poles';
+
+        // Custom pole positions (can be dragged by user)
+        let polePositions = null; // Will be initialized in resizeCanvas
+
+        // Physics constants
+        const PHYSICS = {
+            repulsionStrength: 800,    // How strongly tokens push each other away
+            circleAttraction: 0.05,    // How strongly tokens are pulled to the circle
+            damping: 0.85,             // Velocity damping (friction)
+            minDistance: 50,           // Minimum distance between tokens
+            maxVelocity: 10            // Maximum velocity
+        };
+
+        function resizeCanvas() {
+            const oldCenterX = centerX;
+            const oldCenterY = centerY;
+
+            width = window.innerWidth;
+            height = window.innerHeight - 70;
+            canvas.width = width;
+            canvas.height = height;
+            centerX = width / 2;
+            centerY = height / 2 + 20;
+            radius = Math.min(width, height) * 0.35;
+
+            // Adjust existing positions relative to new center
+            if (oldCenterX && oldCenterY) {
+                const dx = centerX - oldCenterX;
+                const dy = centerY - oldCenterY;
+                for (const pos of tokenPositions.values()) {
+                    pos.x += dx;
+                    pos.y += dy;
+                }
+                // Also adjust pole positions
+                if (polePositions) {
+                    for (const pole of Object.values(polePositions)) {
+                        pole.x += dx;
+                        pole.y += dy;
+                    }
+                }
+            } else {
+                // First time - initialize poles
+                initializePoles();
+            }
+
+            updateTokenPositions();
+        }
+
+        function getTokenCategory(address) {
+            const addr = address.toLowerCase();
+            // Check by address first
+            if (STABLECOINS.has(addr)) return 'stable';
+            if (ETH_DERIVATIVES.has(addr)) return 'eth';
+
+            // Check by symbol pattern
+            const info = tokenInfoCache.get(addr) || KNOWN_TOKENS[addr];
+            if (info && info.symbol) {
+                const symbol = info.symbol;
+                // Check stablecoin patterns
+                for (const pattern of STABLECOIN_PATTERNS) {
+                    if (pattern.test(symbol)) return 'stable';
+                }
+                // Check ETH derivative patterns
+                for (const pattern of ETH_DERIVATIVE_PATTERNS) {
+                    if (pattern.test(symbol)) return 'eth';
+                }
+            }
+
+            return 'other';
+        }
+
+        function getCategoryColor(category) {
+            switch (category) {
+                case 'stable': return '#22c55e'; // Green for stablecoins
+                case 'eth': return '#8b5cf6';    // Purple for ETH derivatives
+                default: return '#f97316';       // Orange for other tokens
+            }
+        }
+
+        function getCategoryLabel(category) {
+            switch (category) {
+                case 'stable': return 'Stablecoin';
+                case 'eth': return 'ETH Derivative';
+                default: return 'Token';
+            }
+        }
+
+        // Public RPC endpoints for different networks
+        const RPC_ENDPOINTS = {
+            'mainnet': 'https://eth.llamarpc.com',
+            'xdai': 'https://rpc.gnosischain.com',
+            'arbitrum_one': 'https://arb1.arbitrum.io/rpc',
+            'base': 'https://mainnet.base.org',
+            'bsc': 'https://bsc-dataseed.binance.org'
+        };
+
+        // Native token info per network (0xeeee... address)
+        const NATIVE_TOKENS = {
+            'mainnet': { symbol: 'ETH', decimals: 18, category: 'eth' },
+            'xdai': { symbol: 'xDAI', decimals: 18, category: 'stable' },
+            'arbitrum_one': { symbol: 'ETH', decimals: 18, category: 'eth' },
+            'base': { symbol: 'ETH', decimals: 18, category: 'eth' },
+            'bsc': { symbol: 'BNB', decimals: 18, category: 'other' }
+        };
+
+        // Map network dropdown values to CoW API network identifiers
+        const API_NETWORK_MAP = {
+            'mainnet': 'mainnet',
+            'xdai': 'xdai',
+            'arbitrum_one': 'arbitrum_one',
+            'base': 'base',
+            'bsc': 'bnb'  // CoW API uses 'bnb' for BNB Chain
+        };
+
+        function getApiNetwork(network) {
+            return API_NETWORK_MAP[network] || network;
+        }
+
+        // ERC20 symbol() function selector
+        const SYMBOL_SELECTOR = '0x95d89b41';
+        const DECIMALS_SELECTOR = '0x313ce567';
+
+        // RPC endpoints (free, CORS-enabled)
+        const RPC_URLS = {
+            'mainnet': [
+                'https://eth.llamarpc.com',
+                'https://rpc.ankr.com/eth',
+                'https://cloudflare-eth.com',
+                'https://ethereum.publicnode.com'
+            ],
+            'xdai': [
+                'https://rpc.gnosischain.com',
+                'https://gnosis.publicnode.com',
+                'https://rpc.ankr.com/gnosis'
+            ],
+            'arbitrum_one': [
+                'https://arb1.arbitrum.io/rpc',
+                'https://arbitrum-one.publicnode.com',
+                'https://rpc.ankr.com/arbitrum'
+            ],
+            'base': [
+                'https://mainnet.base.org',
+                'https://base.publicnode.com',
+                'https://rpc.ankr.com/base'
+            ],
+            'bsc': [
+                'https://bsc-dataseed.binance.org',
+                'https://bsc.publicnode.com',
+                'https://rpc.ankr.com/bsc'
+            ]
+        };
+
+        // Alias for compatibility
+        const BACKUP_RPC_ENDPOINTS = RPC_URLS;
+
+        // Simple fetch wrapper with CORS mode and timeout
+        async function rpcFetch(rpcUrl, body, timeoutMs = 5000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(rpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    mode: 'cors',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (e) {
+                clearTimeout(timeoutId);
+                throw e;
+            }
+        }
+
+        async function fetchTokenInfoFromRPC(address, network) {
+            const rpcUrls = BACKUP_RPC_ENDPOINTS[network] || BACKUP_RPC_ENDPOINTS['mainnet'];
+
+            for (const rpcUrl of rpcUrls) {
+                try {
+                    // Fetch symbol
+                    const symbolResponse = await rpcFetch(rpcUrl, {
+                        jsonrpc: '2.0',
+                        method: 'eth_call',
+                        params: [{ to: address, data: SYMBOL_SELECTOR }, 'latest'],
+                        id: 1
+                    });
+
+                    if (!symbolResponse.ok) continue;
+
+                    const symbolData = await symbolResponse.json();
+
+                    if (symbolData.error) {
+                        console.warn(`[RPC] Error for ${address.slice(0,10)}:`, symbolData.error);
+                        continue;
+                    }
+
+                    if (!symbolData.result || symbolData.result === '0x') continue;
+
+                    const symbol = decodeABIString(symbolData.result);
+                    if (!symbol) continue;
+
+                    // Fetch decimals
+                    let decimals = 18;
+                    try {
+                        const decimalsResponse = await rpcFetch(rpcUrl, {
+                            jsonrpc: '2.0',
+                            method: 'eth_call',
+                            params: [{ to: address, data: DECIMALS_SELECTOR }, 'latest'],
+                            id: 2
+                        });
+                        if (decimalsResponse.ok) {
+                            const decimalsData = await decimalsResponse.json();
+                            if (decimalsData.result && decimalsData.result !== '0x') {
+                                const parsed = parseInt(decimalsData.result, 16);
+                                if (!isNaN(parsed) && parsed <= 77) decimals = parsed;
+                            }
+                        }
+                    } catch (e) {}
+
+                    console.log(`[RPC] ${address.slice(0,10)}... = ${symbol} (${decimals} dec)`);
+                    return { symbol, decimals };
+
+                } catch (e) {
+                    // Try next RPC
+                    continue;
+                }
+            }
+
+            return null;
+        }
+
+        // Decode ABI-encoded string (handles both dynamic strings and bytes32)
+        function decodeABIString(hex) {
+            if (!hex || hex === '0x') return null;
+
+            // Remove 0x prefix
+            hex = hex.slice(2);
+
+            // Helper to check if string looks like a valid symbol
+            function isValidSymbol(str) {
+                if (!str || str.length === 0 || str.length > 30) return false;
+                // Allow letters, numbers, and common symbol characters
+                return /^[\x20-\x7E]+$/.test(str) && /[A-Za-z]/.test(str);
+            }
+
+            // Helper to decode bytes to string
+            function bytesToString(hexStr, startOffset, length) {
+                let str = '';
+                for (let i = 0; i < length * 2 && (startOffset + i + 1) < hexStr.length; i += 2) {
+                    const byte = parseInt(hexStr.slice(startOffset + i, startOffset + i + 2), 16);
+                    if (byte === 0) break;
+                    if (byte >= 32 && byte <= 126) { // Printable ASCII
+                        str += String.fromCharCode(byte);
+                    }
+                }
+                return str.trim();
+            }
+
+            // If it's a short response (64 chars = 32 bytes), it might be bytes32
+            if (hex.length === 64) {
+                // Try to decode as bytes32 (right-padded string)
+                const str = bytesToString(hex, 0, 32);
+                if (isValidSymbol(str)) {
+                    return str;
+                }
+            }
+
+            // Try to decode as dynamic string
+            // Format: offset (32 bytes) + length (32 bytes) + string data
+            if (hex.length >= 128) {
+                try {
+                    // Check if first 32 bytes is the offset (usually 0x20 = 32)
+                    const offset = parseInt(hex.slice(0, 64), 16);
+                    if (offset === 32) {
+                        const length = parseInt(hex.slice(64, 128), 16);
+                        if (length > 0 && length < 100) {
+                            const str = bytesToString(hex, 128, length);
+                            if (isValidSymbol(str)) {
+                                return str;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('ABI decode error:', e);
+                }
+            }
+
+            // Try simpler formats - some contracts return just the string data
+            if (hex.length >= 2) {
+                const str = bytesToString(hex, 0, hex.length / 2);
+                if (isValidSymbol(str)) {
+                    return str;
+                }
+            }
+
+            return null;
+        }
+
+        async function fetchTokenInfo(address, network) {
+            const addr = address.toLowerCase();
+
+            // Check cache first
+            if (tokenInfoCache.has(addr)) {
+                return tokenInfoCache.get(addr);
+            }
+
+            // Handle native token (0xeeee...) based on network
+            if (addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+                const nativeInfo = NATIVE_TOKENS[network] || NATIVE_TOKENS['mainnet'];
+                tokenInfoCache.set(addr, nativeInfo);
+                return nativeInfo;
+            }
+
+            // Check known tokens
+            if (KNOWN_TOKENS[addr]) {
+                tokenInfoCache.set(addr, KNOWN_TOKENS[addr]);
+                return KNOWN_TOKENS[addr];
+            }
+
+            // Fetch from RPC (most reliable method)
+            console.log(`Fetching token info for ${addr.slice(0,10)}... via RPC`);
+            const rpcInfo = await fetchTokenInfoFromRPC(addr, network);
+            if (rpcInfo && rpcInfo.symbol) {
+                const info = { symbol: rpcInfo.symbol, decimals: rpcInfo.decimals };
+                tokenInfoCache.set(addr, info);
+                console.log(`✓ Token ${addr.slice(0,10)}... = ${rpcInfo.symbol}`);
+                return info;
+            }
+
+            // Fallback to abbreviated address
+            console.warn(`✗ Could not resolve token ${addr.slice(0,10)}...`);
+            const info = { symbol: addr.slice(0, 8) + '...', decimals: 18 };
+            tokenInfoCache.set(addr, info);
+            return info;
+        }
+
+        // Token IDs for CoinGecko (for major tokens)
+        const COINGECKO_IDS = {
+            '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 'wrapped-bitcoin', // WBTC
+            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'ethereum', // WETH
+            '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0': 'wrapped-steth', // wstETH
+            '0xae7ab96520de3a18e5e111b5eaab095312d7fe84': 'staked-ether', // stETH
+            '0xae78736cd615f374d3085123a210448e74fc6393': 'rocket-pool-eth', // rETH
+            '0xbe9895146f7af43049ca1c1ae358b0541ea49704': 'coinbase-wrapped-staked-eth', // cbETH
+            '0xdef1ca1fb7fbcdc777520aa7f396b4e015f497ab': 'cow-protocol', // COW
+            '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984': 'uniswap', // UNI
+            '0x514910771af9ca656af840dff83e8264ecf986ca': 'chainlink', // LINK
+            '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9': 'aave', // AAVE
+            '0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2': 'maker', // MKR
+            '0x6810e776880c02933d47db1b9fc05908e5386b96': 'gnosis', // GNO
+        };
+
+        // Fetch price from CoinGecko by coin ID (more reliable)
+        async function fetchPriceFromCoinGeckoById(coinId) {
+            try {
+                const response = await fetch(
+                    `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
+                    { signal: AbortSignal.timeout(5000) }
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data[coinId]?.usd) {
+                        return data[coinId].usd;
+                    }
+                }
+            } catch (e) {
+                // Silent fail
+            }
+            return null;
+        }
+
+        // Fetch native price from CoW Protocol API
+        async function fetchNativePriceFromCow(address, network) {
+            const apiNetwork = getApiNetwork(network);
+
+            try {
+                const response = await fetch(
+                    `https://api.cow.fi/${apiNetwork}/api/v1/token/${address}/native_price`,
+                    { signal: AbortSignal.timeout(5000) }
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    // Returns price in native token (ETH/xDAI)
+                    if (data.price) {
+                        return parseFloat(data.price);
+                    }
+                }
+            } catch (e) {
+                // Silent fail
+            }
+            return null;
+        }
+
+        // Fetch the current ETH price in USD
+        async function fetchEthPrice() {
+            const cached = tokenPriceCache.get('_eth_native');
+            if (cached && Date.now() - cached.timestamp < 60000) {
+                return cached.price;
+            }
+
+            // Method 1: Use CoW Protocol API - get USDC native price (USDC per 1 ETH)
+            // The native_price endpoint returns how much native token (ETH) you get for 1 token
+            // So for USDC: native_price = X means 1 USDC = X ETH, therefore 1 ETH = 1/X USD
+            try {
+                const usdcAddress = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+                const response = await fetch(
+                    `https://api.cow.fi/mainnet/api/v1/token/${usdcAddress}/native_price`,
+                    { signal: AbortSignal.timeout(5000) }
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.price && data.price > 0) {
+                        // data.price is how much ETH per 1 USDC (e.g., 0.0004 ETH per USDC)
+                        // So ETH price = 1 / data.price (e.g., 1/0.0004 = $2500)
+                        const ethPrice = 1 / data.price;
+                        if (ethPrice > 100 && ethPrice < 100000) { // Sanity check
+                            tokenPriceCache.set('_eth_native', { price: ethPrice, timestamp: Date.now() });
+                            console.log('ETH price from CoW API:', ethPrice.toFixed(2));
+                            return ethPrice;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to fetch ETH price from CoW API:', e);
+            }
+
+            // Method 2: Try CoinGecko as backup
+            try {
+                const response = await fetch(
+                    'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+                    { signal: AbortSignal.timeout(5000) }
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.ethereum?.usd) {
+                        const ethPrice = data.ethereum.usd;
+                        tokenPriceCache.set('_eth_native', { price: ethPrice, timestamp: Date.now() });
+                        console.log('ETH price from CoinGecko:', ethPrice.toFixed(2));
+                        return ethPrice;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to fetch ETH price from CoinGecko:', e);
+            }
+
+            // Fallback - but mark as stale so we retry sooner
+            console.warn('Using fallback ETH price');
+            const fallback = 2500;
+            tokenPriceCache.set('_eth_native', { price: fallback, timestamp: Date.now() - 30000 }); // Only cache for 30s
+            return fallback;
+        }
+
+        async function fetchTokenPrice(address, network) {
+            const addr = address.toLowerCase();
+
+            // Check cache (valid for 60 seconds)
+            const cached = tokenPriceCache.get(addr);
+            if (cached && Date.now() - cached.timestamp < 60000) {
+                return cached.price;
+            }
+
+            // Check by symbol pattern for stablecoins
+            const info = tokenInfoCache.get(addr) || KNOWN_TOKENS[addr];
+            if (info && info.symbol) {
+                for (const pattern of STABLECOIN_PATTERNS) {
+                    if (pattern.test(info.symbol)) {
+                        tokenPriceCache.set(addr, { price: 1, timestamp: Date.now() });
+                        return 1;
+                    }
+                }
+            }
+
+            // Stablecoins by address are ~$1
+            if (STABLECOINS.has(addr)) {
+                tokenPriceCache.set(addr, { price: 1, timestamp: Date.now() });
+                return 1;
+            }
+
+            // Native ETH placeholder
+            if (addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+                const ethPrice = await fetchEthPrice();
+                tokenPriceCache.set(addr, { price: ethPrice, timestamp: Date.now() });
+                return ethPrice;
+            }
+
+            // ETH derivatives - try to get actual price from CoW API
+            if (ETH_DERIVATIVES.has(addr)) {
+                const ethPrice = await fetchEthPrice();
+
+                // Try CoW API to get this token's price relative to ETH
+                const nativePrice = await fetchNativePriceFromCow(addr, network);
+                if (nativePrice && nativePrice > 0 && ethPrice > 0) {
+                    // nativePrice is how much ETH per 1 token
+                    // e.g., for wstETH: nativePrice might be 1.15 (1 wstETH = 1.15 ETH)
+                    const tokenUsdPrice = nativePrice * ethPrice;
+                    if (tokenUsdPrice > 100 && tokenUsdPrice < 100000) { // Sanity check
+                        console.log(`${info?.symbol || addr.slice(0,8)}: ${nativePrice.toFixed(4)} ETH = $${tokenUsdPrice.toFixed(2)}`);
+                        tokenPriceCache.set(addr, { price: tokenUsdPrice, timestamp: Date.now() });
+                        return tokenUsdPrice;
+                    }
+                }
+
+                // Fallback to ETH price
+                if (ethPrice > 0) {
+                    tokenPriceCache.set(addr, { price: ethPrice, timestamp: Date.now() });
+                    return ethPrice;
+                }
+            }
+
+            // Check by symbol pattern for ETH derivatives
+            if (info && info.symbol) {
+                for (const pattern of ETH_DERIVATIVE_PATTERNS) {
+                    if (pattern.test(info.symbol)) {
+                        const ethPrice = await fetchEthPrice();
+                        // Try to get actual price ratio from CoW API
+                        const nativePrice = await fetchNativePriceFromCow(addr, network);
+                        if (nativePrice && nativePrice > 0 && ethPrice > 0) {
+                            const tokenUsdPrice = nativePrice * ethPrice;
+                            if (tokenUsdPrice > 100 && tokenUsdPrice < 100000) {
+                                tokenPriceCache.set(addr, { price: tokenUsdPrice, timestamp: Date.now() });
+                                return tokenUsdPrice;
+                            }
+                        }
+                        // Fallback to ETH price
+                        if (ethPrice > 0) {
+                            tokenPriceCache.set(addr, { price: ethPrice, timestamp: Date.now() });
+                            return ethPrice;
+                        }
+                    }
+                }
+            }
+
+            // Try CoinGecko by known ID first (most reliable)
+            const coinGeckoId = COINGECKO_IDS[addr];
+            if (coinGeckoId) {
+                const idPrice = await fetchPriceFromCoinGeckoById(coinGeckoId);
+                if (idPrice && idPrice > 0) {
+                    console.log(`Price for ${info?.symbol || addr.slice(0,8)} from CoinGecko ID: $${idPrice}`);
+                    tokenPriceCache.set(addr, { price: idPrice, timestamp: Date.now() });
+                    return idPrice;
+                }
+            }
+
+            // Try CoinGecko for other tokens by contract address
+            const usdPrice = await fetchPriceFromCoinGecko(addr, network);
+            if (usdPrice && usdPrice > 0) {
+                tokenPriceCache.set(addr, { price: usdPrice, timestamp: Date.now() });
+                return usdPrice;
+            }
+
+            // Try CoW Protocol native price API as fallback
+            const nativePrice = await fetchNativePriceFromCow(addr, network);
+            if (nativePrice && nativePrice > 0) {
+                // The CoW API returns price in ETH (how much ETH per 1 token)
+                // nativePrice is already normalized (1 token = X ETH)
+                const ethPrice = await fetchEthPrice();
+                const calculatedUsdPrice = nativePrice * ethPrice;
+                // Sanity check - if price seems unreasonable, skip it
+                if (calculatedUsdPrice > 0.0000001 && calculatedUsdPrice < 1000000) {
+                    tokenPriceCache.set(addr, { price: calculatedUsdPrice, timestamp: Date.now() });
+                    return calculatedUsdPrice;
+                }
+            }
+
+            // Fallback: no price available
+            tokenPriceCache.set(addr, { price: 0, timestamp: Date.now() });
+            return 0;
+        }
+
+        // Fetch price from CoinGecko using contract address
+        async function fetchPriceFromCoinGecko(address, network) {
+            const platformMap = {
+                'mainnet': 'ethereum',
+                'xdai': 'xdai',
+                'arbitrum_one': 'arbitrum-one',
+                'base': 'base'
+            };
+            const platform = platformMap[network] || 'ethereum';
+
+            try {
+                const response = await fetch(
+                    `https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${address}&vs_currencies=usd`,
+                    { signal: AbortSignal.timeout(5000) }
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    const tokenData = data[address.toLowerCase()];
+                    if (tokenData?.usd) {
+                        return tokenData.usd;
+                    }
+                }
+            } catch (e) {
+                // Silent fail - will try other methods
+            }
+            return null;
+        }
+
+        async function getTokenInfo(address) {
+            const addr = address.toLowerCase();
+            const info = tokenInfoCache.get(addr) || KNOWN_TOKENS[addr] || { symbol: addr.slice(0, 6) + '...', decimals: 18 };
+            const price = tokenPriceCache.get(addr)?.price || 0;
+            const category = getTokenCategory(addr);
+            return { ...info, price, category, color: getCategoryColor(category) };
+        }
+
+        function calculateUSDValue(amount, tokenAddress) {
+            const addr = tokenAddress.toLowerCase();
+            const info = tokenInfoCache.get(addr) || KNOWN_TOKENS[addr] || { decimals: 18 };
+            const price = tokenPriceCache.get(addr)?.price || 0;
+            const value = parseFloat(amount) / Math.pow(10, info.decimals);
+            return value * price;
+        }
+
+        // Category poles - 3 points forming a triangle (can be moved by user)
+        function getDefaultPolePositions() {
+            const poleRadius = radius * 0.6; // Distance from center to each pole
+            return {
+                stable: {
+                    x: centerX + Math.cos(-Math.PI * 0.5) * poleRadius,  // Top
+                    y: centerY + Math.sin(-Math.PI * 0.5) * poleRadius
+                },
+                eth: {
+                    x: centerX + Math.cos(Math.PI * 0.17) * poleRadius,  // Bottom-right
+                    y: centerY + Math.sin(Math.PI * 0.17) * poleRadius
+                },
+                other: {
+                    x: centerX + Math.cos(Math.PI * 0.83) * poleRadius,  // Bottom-left
+                    y: centerY + Math.sin(Math.PI * 0.83) * poleRadius
+                }
+            };
+        }
+
+        function getCategoryPoles() {
+            // Return custom positions if set, otherwise default
+            if (!polePositions) {
+                polePositions = getDefaultPolePositions();
+            }
+            return polePositions;
+        }
+
+        function initializePoles() {
+            polePositions = getDefaultPolePositions();
+        }
+
+        // Calculate token size based on volume
+        function getTokenSize(address) {
+            const tokenData = tokens.get(address);
+            const maxVolume = Math.max(...Array.from(tokens.values()).map(t => t.totalSellVolume + t.totalBuyVolume), 1);
+            const totalVolume = (tokenData?.totalSellVolume || 0) + (tokenData?.totalBuyVolume || 0);
+            return 12 + (totalVolume / maxVolume) * 20;
+        }
+
+        function updateTokenPositions() {
+            const tokenList = Array.from(tokens.keys());
+            const count = tokenList.length;
+            if (count === 0) return;
+
+            const poles = getCategoryPoles();
+
+            // Group tokens by category
+            const categoryTokens = { stable: [], eth: [], other: [] };
+            tokenList.forEach(addr => {
+                const cat = getTokenCategory(addr);
+                categoryTokens[cat].push(addr);
+            });
+
+            // Sort each category by volume
+            for (const cat of ['stable', 'eth', 'other']) {
+                categoryTokens[cat].sort((a, b) => {
+                    const volA = (tokens.get(a)?.totalSellVolume || 0) + (tokens.get(a)?.totalBuyVolume || 0);
+                    const volB = (tokens.get(b)?.totalSellVolume || 0) + (tokens.get(b)?.totalBuyVolume || 0);
+                    return volB - volA;
+                });
+            }
+
+            // Position tokens in circles around their category pole
+            for (const [category, addresses] of Object.entries(categoryTokens)) {
+                const pole = poles[category];
+                const catCount = addresses.length;
+
+                // Fewer tokens per ring, more spacing - less cluttered
+                const tokensPerRing = 5;
+                const ringSpacing = 55; // More space between rings
+                const baseRadius = 70;  // Larger first ring radius
+
+                addresses.forEach((address, index) => {
+                    // Determine which ring this token is on
+                    const ringIndex = Math.floor(index / tokensPerRing);
+                    const posInRing = index % tokensPerRing;
+                    const tokensInThisRing = Math.min(tokensPerRing, catCount - ringIndex * tokensPerRing);
+
+                    // Calculate orbit radius and angle - spread evenly
+                    const orbitRadius = baseRadius + ringIndex * ringSpacing;
+                    const angle = (posInRing / tokensInThisRing) * Math.PI * 2 + (ringIndex * 0.5); // Offset each ring
+
+                    const targetX = pole.x + Math.cos(angle) * orbitRadius;
+                    const targetY = pole.y + Math.sin(angle) * orbitRadius;
+
+                    const existing = tokenPositions.get(address);
+                    if (existing) {
+                        // Only update pole reference and size - don't move existing tokens
+                        existing.poleX = pole.x;
+                        existing.poleY = pole.y;
+                        existing.size = getTokenSize(address);
+                    } else {
+                        // Initialize new position directly at target position (no randomness)
+                        tokenPositions.set(address, {
+                            x: targetX,
+                            y: targetY,
+                            vx: 0, vy: 0,
+                            targetX, targetY,
+                            poleX: pole.x,
+                            poleY: pole.y,
+                            orbitRadius: orbitRadius,
+                            targetAngle: angle,
+                            angle: angle,
+                            size: getTokenSize(address)
+                        });
+                    }
+                });
+            }
+
+            // Remove positions for tokens that no longer exist
+            for (const [addr] of tokenPositions) {
+                if (!tokens.has(addr)) {
+                    tokenPositions.delete(addr);
+                }
+            }
+
+            // Start physics simulation if not running
+            if (!animationFrameId) {
+                startPhysicsLoop();
+            }
+        }
+
+        // Physics simulation step - tokens form circles around poles
+        function physicsStep() {
+            if (!physicsEnabled) return;
+
+            const positions = Array.from(tokenPositions.entries());
+            const poles = getCategoryPoles();
+
+            positions.forEach(([addr, pos]) => {
+                // Skip dragged token
+                if (addr === draggedToken) return;
+
+                // Update pole reference (in case pole was moved)
+                const category = getTokenCategory(addr);
+                const pole = poles[category];
+                if (pole) {
+                    pos.poleX = pole.x;
+                    pos.poleY = pole.y;
+                }
+
+                // No pull towards target - tokens stay where placed/dragged
+                // Only repulsion keeps them from overlapping
+
+                // Repulsion from other tokens
+                positions.forEach(([otherAddr, otherPos]) => {
+                    if (addr === otherAddr) return;
+
+                    const dx = pos.x - otherPos.x;
+                    const dy = pos.y - otherPos.y;
+                    const distSq = dx * dx + dy * dy;
+                    const minDist = pos.size + otherPos.size + 35; // More spacing between tokens
+                    const minDistSq = minDist * minDist;
+
+                    if (distSq < minDistSq && distSq > 0) {
+                        const dist = Math.sqrt(distSq);
+                        const force = PHYSICS.repulsionStrength * 1.5 / distSq; // Stronger repulsion
+                        pos.vx += (dx / dist) * force;
+                        pos.vy += (dy / dist) * force;
+                    }
+                });
+
+                // Apply velocity with damping
+                pos.vx *= PHYSICS.damping;
+                pos.vy *= PHYSICS.damping;
+
+                // Clamp velocity
+                const speed = Math.sqrt(pos.vx * pos.vx + pos.vy * pos.vy);
+                if (speed > PHYSICS.maxVelocity) {
+                    pos.vx = (pos.vx / speed) * PHYSICS.maxVelocity;
+                    pos.vy = (pos.vy / speed) * PHYSICS.maxVelocity;
+                }
+
+                // Stop completely if velocity is very small (prevents jittering)
+                if (speed < 0.05) {
+                    pos.vx = 0;
+                    pos.vy = 0;
+                    return; // Don't update position if stopped
+                }
+
+                // Update position
+                pos.x += pos.vx;
+                pos.y += pos.vy;
+
+                // Update actual angle based on position relative to pole
+                pos.angle = Math.atan2(pos.y - (pos.poleY || centerY), pos.x - (pos.poleX || centerX));
+            });
+        }
+
+        // Animation loop
+        function startPhysicsLoop() {
+            function loop() {
+                physicsStep();
+                draw();
+                animationFrameId = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        function stopPhysicsLoop() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        }
+
+        async function processOrders(orderList) {
+            tokens.clear();
+            edges.clear();
+            orders.clear();
+
+            const network = document.getElementById('network').value;
+
+            // First pass: collect all tokens
+            const allTokens = new Set();
+            orderList.forEach(order => {
+                allTokens.add(order.sellToken.toLowerCase());
+                allTokens.add(order.buyToken.toLowerCase());
+            });
+
+            // Filter to only unknown tokens (not in KNOWN_TOKENS and not already cached)
+            const unknownTokens = Array.from(allTokens).filter(addr =>
+                !KNOWN_TOKENS[addr] && !tokenInfoCache.has(addr)
+            );
+
+            console.log(`[processOrders] ${allTokens.size} tokens, ${unknownTokens.length} unknown`);
+
+            // Fetch unknown token symbols from RPC (batch of 5 at a time)
+            for (let i = 0; i < unknownTokens.length; i += 5) {
+                const batch = unknownTokens.slice(i, i + 5);
+                await Promise.all(batch.map(addr => fetchTokenInfo(addr, network)));
+            }
+
+            // First, fetch the native ETH price (used for all ETH derivatives)
+            await fetchEthPrice();
+
+            // Fetch prices for all tokens (in parallel, with rate limiting)
+            const tokenArray = Array.from(allTokens);
+            for (let i = 0; i < tokenArray.length; i += 5) {
+                const batch = tokenArray.slice(i, i + 5);
+                await Promise.all(batch.map(addr => fetchTokenPrice(addr, network)));
+            }
+
+            // Second pass: process orders with prices
+            orderList.forEach(order => {
+                const sellToken = order.sellToken.toLowerCase();
+                const buyToken = order.buyToken.toLowerCase();
+                const sellValue = calculateUSDValue(order.sellAmount, sellToken);
+                const buyValue = calculateUSDValue(order.buyAmount, buyToken);
+
+                orders.set(order.uid, order);
+
+                // Update sell token
+                if (!tokens.has(sellToken)) {
+                    tokens.set(sellToken, {
+                        totalSellVolume: 0,
+                        totalBuyVolume: 0,
+                        orders: [],
+                        category: getTokenCategory(sellToken)
+                    });
+                }
+                const sellTokenData = tokens.get(sellToken);
+                sellTokenData.totalSellVolume += sellValue;
+                sellTokenData.orders.push(order.uid);
+
+                // Update buy token
+                if (!tokens.has(buyToken)) {
+                    tokens.set(buyToken, {
+                        totalSellVolume: 0,
+                        totalBuyVolume: 0,
+                        orders: [],
+                        category: getTokenCategory(buyToken)
+                    });
+                }
+                const buyTokenData = tokens.get(buyToken);
+                buyTokenData.totalBuyVolume += buyValue;
+                buyTokenData.orders.push(order.uid);
+
+                // Update edge
+                const edgeKey = `${sellToken}-${buyToken}`;
+                if (!edges.has(edgeKey)) {
+                    edges.set(edgeKey, { sellToken, buyToken, sellVolume: 0, buyVolume: 0, orders: [] });
+                }
+                const edge = edges.get(edgeKey);
+                edge.sellVolume += sellValue;
+                edge.buyVolume += buyValue;
+                edge.orders.push(order.uid);
+            });
+
+            updateTokenPositions();
+            updateStats();
+            updateTokenList();
+        }
+
+        function updateStats() {
+            document.getElementById('order-count').textContent = orders.size;
+            document.getElementById('token-count').textContent = tokens.size;
+
+            let totalVolume = 0;
+            tokens.forEach(t => totalVolume += t.totalSellVolume);
+            document.getElementById('total-volume').textContent = totalVolume > 1000000
+                ? `$${(totalVolume / 1000000).toFixed(1)}M`
+                : totalVolume > 1000
+                    ? `$${(totalVolume / 1000).toFixed(1)}K`
+                    : `$${totalVolume.toFixed(0)}`;
+        }
+
+        async function updateTokenList() {
+            const list = document.getElementById('token-list');
+            const tokenArray = await Promise.all(
+                Array.from(tokens.entries()).map(async ([address, data]) => {
+                    const info = await getTokenInfo(address);
+                    return {
+                        address,
+                        symbol: info.symbol,
+                        volume: data.totalSellVolume + data.totalBuyVolume,
+                        color: info.color,
+                        price: info.price,
+                        category: info.category
+                    };
+                })
+            );
+
+            tokenArray.sort((a, b) => b.volume - a.volume);
+            const topTokens = tokenArray.slice(0, 12);
+
+            list.innerHTML = topTokens.map(t => `
+                <div class="token-item">
+                    <div>
+                        <span class="token-symbol" style="color: ${t.color}">${t.symbol}</span>
+                        ${t.price > 0 ? `<span class="token-price">$${t.price < 0.01 ? t.price.toExponential(2) : t.price.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>` : ''}
+                    </div>
+                    <span class="token-volume">$${t.volume > 1000 ? (t.volume / 1000).toFixed(1) + 'K' : t.volume.toFixed(0)}</span>
+                </div>
+            `).join('');
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw poles and category labels (only in poles mode)
+            if (layoutMode === 'poles') {
+                drawPoles();
+            } else {
+                drawCircleLayout();
+            }
+
+            // Draw edges
+            drawEdges();
+
+            // Draw tokens
+            drawTokens();
+        }
+
+        function drawCircleLayout() {
+            // Draw the main circle
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 0.85, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Draw category arc indicators
+            const tokenList = Array.from(tokens.keys());
+            const categoryTokens = { stable: [], eth: [], other: [] };
+            tokenList.forEach(addr => {
+                const cat = getTokenCategory(addr);
+                categoryTokens[cat].push(addr);
+            });
+
+            const totalTokens = tokenList.length;
+            if (totalTokens === 0) return;
+
+            const stableCount = categoryTokens.stable.length;
+            const ethCount = categoryTokens.eth.length;
+            const otherCount = categoryTokens.other.length;
+
+            const minArc = Math.PI * 0.15;
+            let stableArc = Math.max(minArc, (stableCount / totalTokens) * Math.PI * 2);
+            let ethArc = Math.max(minArc, (ethCount / totalTokens) * Math.PI * 2);
+            let otherArc = Math.max(minArc, (otherCount / totalTokens) * Math.PI * 2);
+
+            const totalArc = stableArc + ethArc + otherArc;
+            stableArc = (stableArc / totalArc) * Math.PI * 2;
+            ethArc = (ethArc / totalArc) * Math.PI * 2;
+            otherArc = (otherArc / totalArc) * Math.PI * 2;
+
+            const arcRadius = radius * 0.85 + 25;
+            let currentAngle = -Math.PI / 2;
+
+            // Draw stable arc
+            if (stableCount > 0) {
+                ctx.strokeStyle = getCategoryColor('stable') + '60';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, arcRadius, currentAngle, currentAngle + stableArc);
+                ctx.stroke();
+            }
+            currentAngle += stableArc;
+
+            // Draw ETH arc
+            if (ethCount > 0) {
+                ctx.strokeStyle = getCategoryColor('eth') + '60';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, arcRadius, currentAngle, currentAngle + ethArc);
+                ctx.stroke();
+            }
+            currentAngle += ethArc;
+
+            // Draw other arc
+            if (otherCount > 0) {
+                ctx.strokeStyle = getCategoryColor('other') + '60';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, arcRadius, currentAngle, currentAngle + otherArc);
+                ctx.stroke();
+            }
+        }
+
+        function drawPoles() {
+            const poles = getCategoryPoles();
+            const labels = {
+                stable: 'STABLECOINS',
+                eth: 'ETH & DERIVATIVES',
+                other: 'OTHER TOKENS'
+            };
+
+            for (const [category, pole] of Object.entries(poles)) {
+                const color = getCategoryColor(category);
+                const isBeingDragged = draggedPole === category;
+
+                // Draw pole glow (larger when dragged)
+                const glowRadius = isBeingDragged ? 130 : 100;
+                const gradient = ctx.createRadialGradient(pole.x, pole.y, 0, pole.x, pole.y, glowRadius);
+                gradient.addColorStop(0, color + (isBeingDragged ? '40' : '20'));
+                gradient.addColorStop(1, 'transparent');
+                ctx.beginPath();
+                ctx.arc(pole.x, pole.y, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // Draw orbit rings (showing where tokens should be)
+                ctx.strokeStyle = color + '15';
+                ctx.lineWidth = 1;
+                for (let r = 60; r <= 150; r += 45) {
+                    ctx.beginPath();
+                    ctx.arc(pole.x, pole.y, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Draw pole circle (larger and more visible when dragged)
+                const poleSize = isBeingDragged ? 12 : 10;
+                ctx.beginPath();
+                ctx.arc(pole.x, pole.y, poleSize, 0, Math.PI * 2);
+                ctx.fillStyle = isBeingDragged ? color : color + '80';
+                ctx.fill();
+                ctx.strokeStyle = isBeingDragged ? '#fff' : color;
+                ctx.lineWidth = isBeingDragged ? 3 : 2;
+                ctx.stroke();
+
+                // Draw label
+                ctx.font = 'bold 11px Segoe UI';
+                ctx.fillStyle = color;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // Position label based on pole position
+                let labelY = pole.y;
+                if (category === 'stable') {
+                    labelY = pole.y - 30; // Above for top pole
+                } else {
+                    labelY = pole.y + 30; // Below for bottom poles
+                }
+                ctx.fillText(labels[category], pole.x, labelY);
+            }
+        }
+
+        function drawEdges() {
+            const maxVolume = Math.max(...Array.from(edges.values()).map(e => Math.max(e.sellVolume, e.buyVolume)), 1);
+
+            edges.forEach((edge, key) => {
+                const fromPos = tokenPositions.get(edge.sellToken);
+                const toPos = tokenPositions.get(edge.buyToken);
+                if (!fromPos || !toPos) return;
+
+                const isHovered = hoveredEdge === key;
+                const maxWidth = 20;
+                const minWidth = 1;
+
+                // Calculate widths based on volume (logarithmic scale)
+                const sellWidth = Math.max(minWidth, Math.min(maxWidth, (Math.log10(edge.sellVolume + 1) / Math.log10(maxVolume + 1)) * maxWidth));
+                const buyWidth = Math.max(minWidth, Math.min(maxWidth, (Math.log10(edge.buyVolume + 1) / Math.log10(maxVolume + 1)) * maxWidth));
+
+                // Draw tapered line (thick at sell end, thin at buy end)
+                drawTaperedLine(fromPos.x, fromPos.y, toPos.x, toPos.y, sellWidth, buyWidth, isHovered, edge);
+            });
+        }
+
+        function drawTaperedLine(x1, y1, x2, y2, width1, width2, isHovered, edge) {
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const perpAngle = angle + Math.PI / 2;
+
+            // Offset from token center
+            const offset = 25;
+            const startX = x1 + Math.cos(angle) * offset;
+            const startY = y1 + Math.sin(angle) * offset;
+            const endX = x2 - Math.cos(angle) * offset;
+            const endY = y2 - Math.sin(angle) * offset;
+
+            // Get colors based on token categories
+            const sellCategory = getTokenCategory(edge.sellToken);
+            const buyCategory = getTokenCategory(edge.buyToken);
+            const sellColor = getCategoryColor(sellCategory);
+            const buyColor = getCategoryColor(buyCategory);
+
+            // Create gradient
+            const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+            if (isHovered) {
+                gradient.addColorStop(0, '#00d4aa');
+                gradient.addColorStop(1, '#00d4aa88');
+            } else {
+                gradient.addColorStop(0, sellColor);
+                gradient.addColorStop(1, buyColor + '88');
+            }
+
+            // Draw tapered shape
+            ctx.beginPath();
+            ctx.moveTo(
+                startX + Math.cos(perpAngle) * width1 / 2,
+                startY + Math.sin(perpAngle) * width1 / 2
+            );
+            ctx.lineTo(
+                endX + Math.cos(perpAngle) * width2 / 2,
+                endY + Math.sin(perpAngle) * width2 / 2
+            );
+            ctx.lineTo(
+                endX - Math.cos(perpAngle) * width2 / 2,
+                endY - Math.sin(perpAngle) * width2 / 2
+            );
+            ctx.lineTo(
+                startX - Math.cos(perpAngle) * width1 / 2,
+                startY - Math.sin(perpAngle) * width1 / 2
+            );
+            ctx.closePath();
+
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            // Draw arrow at end
+            if (width1 > 3 || width2 > 3) {
+                const arrowSize = Math.max(5, (width1 + width2) / 2);
+                ctx.beginPath();
+                ctx.moveTo(endX, endY);
+                ctx.lineTo(
+                    endX - Math.cos(angle - 0.3) * arrowSize,
+                    endY - Math.sin(angle - 0.3) * arrowSize
+                );
+                ctx.lineTo(
+                    endX - Math.cos(angle + 0.3) * arrowSize,
+                    endY - Math.sin(angle + 0.3) * arrowSize
+                );
+                ctx.closePath();
+                ctx.fillStyle = isHovered ? '#00d4aa' : buyColor;
+                ctx.fill();
+            }
+        }
+
+        async function drawTokens() {
+            for (const [address, pos] of tokenPositions) {
+                const tokenInfo = await getTokenInfo(address);
+                const size = pos.size || 15;
+
+                const isHovered = hoveredToken === address;
+                const isDragged = draggedToken === address;
+
+                // Draw glow for active tokens
+                const gradient = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, size * 2);
+                gradient.addColorStop(0, tokenInfo.color + '40');
+                gradient.addColorStop(1, 'transparent');
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, size * 2, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // Draw token circle
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+                ctx.fillStyle = (isHovered || isDragged) ? '#fff' : tokenInfo.color;
+                ctx.fill();
+
+                if (isHovered || isDragged) {
+                    ctx.strokeStyle = isDragged ? '#ff6b6b' : '#00d4aa';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+
+                // Draw label
+                ctx.font = (isHovered || isDragged) ? 'bold 14px Segoe UI' : '12px Segoe UI';
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // Position label away from pole (outward direction)
+                const poleX = pos.poleX || centerX;
+                const poleY = pos.poleY || centerY;
+                const angleFromPole = Math.atan2(pos.y - poleY, pos.x - poleX);
+                const labelRadius = size + 18;
+                const labelX = pos.x + Math.cos(angleFromPole) * labelRadius;
+                const labelY = pos.y + Math.sin(angleFromPole) * labelRadius;
+
+                // Background for label
+                const labelWidth = ctx.measureText(tokenInfo.symbol).width + 10;
+                ctx.fillStyle = 'rgba(20, 20, 40, 0.85)';
+                ctx.fillRect(labelX - labelWidth / 2, labelY - 9, labelWidth, 18);
+                ctx.strokeStyle = tokenInfo.color;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(labelX - labelWidth / 2, labelY - 9, labelWidth, 18);
+
+                ctx.fillStyle = '#fff';
+                ctx.fillText(tokenInfo.symbol, labelX, labelY);
+            }
+        }
+
+        // Find token at position
+        function findTokenAt(x, y) {
+            for (const [address, pos] of tokenPositions) {
+                const size = pos.size || 15;
+                const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+                if (dist < size + 5) {
+                    return address;
+                }
+            }
+            return null;
+        }
+
+        // Find pole at position (only in poles mode)
+        function findPoleAt(x, y) {
+            if (layoutMode !== 'poles') return null;
+
+            const poles = getCategoryPoles();
+            const poleHitRadius = 20; // How close you need to click to grab a pole
+
+            for (const [category, pole] of Object.entries(poles)) {
+                const dist = Math.sqrt((x - pole.x) ** 2 + (y - pole.y) ** 2);
+                if (dist < poleHitRadius) {
+                    return category;
+                }
+            }
+            return null;
+        }
+
+        // Find edge at position
+        function findEdgeAt(x, y) {
+            for (const [key, edge] of edges) {
+                const fromPos = tokenPositions.get(edge.sellToken);
+                const toPos = tokenPositions.get(edge.buyToken);
+                if (!fromPos || !toPos) continue;
+
+                const dist = pointToLineDistance(x, y, fromPos.x, fromPos.y, toPos.x, toPos.y);
+                if (dist < 15) {
+                    return { key, edge };
+                }
+            }
+            return null;
+        }
+
+        function handleMouseDown(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if clicking on a pole first (poles are underneath tokens)
+            const poleCategory = findPoleAt(x, y);
+
+            // Check if clicking on a token
+            const tokenAddr = findTokenAt(x, y);
+
+            if (tokenAddr) {
+                draggedToken = tokenAddr;
+                draggedPole = null;
+                isDragging = true;
+                canvas.classList.add('dragging');
+                hideTooltip();
+            } else if (poleCategory) {
+                draggedPole = poleCategory;
+                draggedToken = null;
+                isDragging = true;
+                canvas.classList.add('dragging');
+                hideTooltip();
+            }
+        }
+
+        function handleMouseUp(e) {
+            if (isDragging) {
+                draggedToken = null;
+                draggedPole = null;
+                isDragging = false;
+                canvas.classList.remove('dragging');
+            }
+        }
+
+        function handleMouseMove(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Handle dragging a pole
+            if (isDragging && draggedPole) {
+                const poles = getCategoryPoles();
+                if (poles[draggedPole]) {
+                    // Calculate how much the pole moved
+                    const dx = x - poles[draggedPole].x;
+                    const dy = y - poles[draggedPole].y;
+
+                    // Move the pole
+                    poles[draggedPole].x = x;
+                    poles[draggedPole].y = y;
+
+                    // Move all tokens in this category with the pole
+                    for (const [addr, pos] of tokenPositions) {
+                        const category = getTokenCategory(addr);
+                        if (category === draggedPole) {
+                            pos.x += dx;
+                            pos.y += dy;
+                            pos.poleX = x;
+                            pos.poleY = y;
+                        }
+                    }
+                }
+                return; // Don't do hover detection while dragging
+            }
+
+            // Handle dragging a token
+            if (isDragging && draggedToken) {
+                const pos = tokenPositions.get(draggedToken);
+                if (pos) {
+                    pos.x = x;
+                    pos.y = y;
+                    pos.vx = 0;
+                    pos.vy = 0;
+
+                    // Find nearest pole and update association
+                    const poles = getCategoryPoles();
+                    let nearestPole = null;
+                    let nearestDist = Infinity;
+                    let nearestPolePos = null;
+                    for (const [cat, pole] of Object.entries(poles)) {
+                        const dist = Math.sqrt((x - pole.x) ** 2 + (y - pole.y) ** 2);
+                        if (dist < nearestDist) {
+                            nearestDist = dist;
+                            nearestPole = cat;
+                            nearestPolePos = pole;
+                        }
+                    }
+                    if (nearestPolePos) {
+                        pos.poleX = nearestPolePos.x;
+                        pos.poleY = nearestPolePos.y;
+                        pos.orbitRadius = nearestDist; // Set orbit to current distance
+                    }
+                }
+                return; // Don't do hover detection while dragging
+            }
+
+            let found = false;
+
+            // Check tokens first
+            for (const [address, pos] of tokenPositions) {
+                const size = pos.size || 15;
+                const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+                if (dist < size + 5) {
+                    hoveredToken = address;
+                    hoveredEdge = null;
+                    found = true;
+                    canvas.style.cursor = 'grab';
+                    showTokenTooltip(e, address);
+                    break;
+                }
+            }
+
+            // Check poles if no token hovered
+            if (!found) {
+                const poleCategory = findPoleAt(x, y);
+                if (poleCategory) {
+                    canvas.style.cursor = 'grab';
+                    found = true;
+                    // Could show pole tooltip here
+                }
+            }
+
+            // Check edges if no token or pole hovered
+            if (!found) {
+                hoveredToken = null;
+                canvas.style.cursor = 'default';
+                for (const [key, edge] of edges) {
+                    const fromPos = tokenPositions.get(edge.sellToken);
+                    const toPos = tokenPositions.get(edge.buyToken);
+                    if (!fromPos || !toPos) continue;
+
+                    const dist = pointToLineDistance(x, y, fromPos.x, fromPos.y, toPos.x, toPos.y);
+                    if (dist < 15) {
+                        hoveredEdge = key;
+                        found = true;
+                        showEdgeTooltip(e, edge);
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                hoveredToken = null;
+                hoveredEdge = null;
+                hideTooltip();
+            }
+        }
+
+        function pointToLineDistance(px, py, x1, y1, x2, y2) {
+            const A = px - x1;
+            const B = py - y1;
+            const C = x2 - x1;
+            const D = y2 - y1;
+
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            if (lenSq !== 0) param = dot / lenSq;
+
+            let xx, yy;
+            if (param < 0) {
+                xx = x1;
+                yy = y1;
+            } else if (param > 1) {
+                xx = x2;
+                yy = y2;
+            } else {
+                xx = x1 + param * C;
+                yy = y1 + param * D;
+            }
+
+            const dx = px - xx;
+            const dy = py - yy;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        async function showTokenTooltip(e, address) {
+            const tooltip = document.getElementById('tooltip');
+            const tokenInfo = await getTokenInfo(address);
+            const tokenData = tokens.get(address);
+            const category = getTokenCategory(address);
+            const categoryLabel = getCategoryLabel(category);
+            const categoryClass = `category-${category}`;
+
+            const priceDisplay = tokenInfo.price > 0
+                ? (tokenInfo.price < 0.01
+                    ? tokenInfo.price.toExponential(2)
+                    : tokenInfo.price.toLocaleString(undefined, {maximumFractionDigits: 2}))
+                : 'N/A';
+
+            tooltip.innerHTML = `
+                <div class="tooltip-title">${tokenInfo.symbol}</div>
+                <div class="tooltip-subtitle">${address}</div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Price:</span>
+                    <span class="tooltip-price">$${priceDisplay}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Sell Volume:</span>
+                    <span class="tooltip-value">$${(tokenData?.totalSellVolume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Buy Volume:</span>
+                    <span class="tooltip-value">$${(tokenData?.totalBuyVolume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Orders:</span>
+                    <span class="tooltip-value">${tokenData?.orders.length || 0}</span>
+                </div>
+                <span class="tooltip-category ${categoryClass}">${categoryLabel}</span>
+            `;
+
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        async function showEdgeTooltip(e, edge) {
+            const tooltip = document.getElementById('tooltip');
+            const sellInfo = await getTokenInfo(edge.sellToken);
+            const buyInfo = await getTokenInfo(edge.buyToken);
+
+            tooltip.innerHTML = `
+                <div class="tooltip-title">${sellInfo.symbol} → ${buyInfo.symbol}</div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Sell Volume:</span>
+                    <span class="tooltip-value">$${edge.sellVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Buy Volume:</span>
+                    <span class="tooltip-value">$${edge.buyVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Orders:</span>
+                    <span class="tooltip-value">${edge.orders.length}</span>
+                </div>
+            `;
+
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
+        }
+
+        async function fetchOrders() {
+            const network = document.getElementById('network').value;
+            const apiNetwork = getApiNetwork(network);
+
+            try {
+                const auctionRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v2/solver_competition/latest`);
+                if (!auctionRes.ok) return;
+
+                const auctionData = await auctionRes.json();
+                const orderUids = auctionData.auction?.orders || [];
+
+                document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
+
+                // Fetch order details
+                const orderPromises = orderUids.slice(0, 50).map(async uid => {
+                    try {
+                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
+                        if (orderRes.ok) {
+                            return await orderRes.json();
+                        }
+                    } catch (e) {}
+                    return null;
+                });
+
+                const orderList = (await Promise.all(orderPromises)).filter(o => o && o.status === 'open');
+                await processOrders(orderList);
+                // Physics loop handles drawing
+
+            } catch (error) {
+                console.error('Error fetching orders:', error);
+            }
+        }
+
+        function resetView() {
+            // Reset poles to default positions
+            polePositions = null;
+            initializePoles();
+            // Reset token positions
+            tokenPositions.clear();
+            updateTokenPositions();
+        }
+
+        function toggleLayout() {
+            const button = document.getElementById('layout-toggle');
+            if (layoutMode === 'poles') {
+                layoutMode = 'circle';
+                button.textContent = 'Cluster View';
+                arrangeInCircle();
+            } else {
+                layoutMode = 'poles';
+                button.textContent = 'Circle View';
+                // Reset to pole-based layout
+                tokenPositions.clear();
+                updateTokenPositions();
+            }
+        }
+
+        function arrangeInCircle() {
+            const tokenList = Array.from(tokens.keys());
+            const count = tokenList.length;
+            if (count === 0) return;
+
+            // Group tokens by category and sort by volume within each
+            const categoryTokens = { stable: [], eth: [], other: [] };
+            tokenList.forEach(addr => {
+                const cat = getTokenCategory(addr);
+                categoryTokens[cat].push(addr);
+            });
+
+            // Sort each category by volume
+            for (const cat of ['stable', 'eth', 'other']) {
+                categoryTokens[cat].sort((a, b) => {
+                    const volA = (tokens.get(a)?.totalSellVolume || 0) + (tokens.get(a)?.totalBuyVolume || 0);
+                    const volB = (tokens.get(b)?.totalSellVolume || 0) + (tokens.get(b)?.totalBuyVolume || 0);
+                    return volB - volA;
+                });
+            }
+
+            // Arrange in single circle: stables, then ETH, then others
+            const orderedTokens = [
+                ...categoryTokens.stable,
+                ...categoryTokens.eth,
+                ...categoryTokens.other
+            ];
+
+            // Calculate segment angles for each category
+            const totalTokens = orderedTokens.length;
+            const stableCount = categoryTokens.stable.length;
+            const ethCount = categoryTokens.eth.length;
+            const otherCount = categoryTokens.other.length;
+
+            // Each category gets proportional arc, but minimum arc for visibility
+            const minArc = Math.PI * 0.15; // Minimum 15% of half circle per category
+            let stableArc = Math.max(minArc, (stableCount / totalTokens) * Math.PI * 2);
+            let ethArc = Math.max(minArc, (ethCount / totalTokens) * Math.PI * 2);
+            let otherArc = Math.max(minArc, (otherCount / totalTokens) * Math.PI * 2);
+
+            // Normalize to full circle
+            const totalArc = stableArc + ethArc + otherArc;
+            stableArc = (stableArc / totalArc) * Math.PI * 2;
+            ethArc = (ethArc / totalArc) * Math.PI * 2;
+            otherArc = (otherArc / totalArc) * Math.PI * 2;
+
+            const circleRadius = radius * 0.85;
+
+            // Position stables (starting at top, going clockwise)
+            let currentAngle = -Math.PI / 2; // Start at top
+            categoryTokens.stable.forEach((addr, i) => {
+                const angle = currentAngle + (i + 0.5) / Math.max(stableCount, 1) * stableArc;
+                const pos = tokenPositions.get(addr);
+                const targetX = centerX + Math.cos(angle) * circleRadius;
+                const targetY = centerY + Math.sin(angle) * circleRadius;
+                if (pos) {
+                    pos.x = targetX;
+                    pos.y = targetY;
+                    pos.vx = 0;
+                    pos.vy = 0;
+                    pos.poleX = centerX;
+                    pos.poleY = centerY;
+                } else {
+                    tokenPositions.set(addr, {
+                        x: targetX, y: targetY,
+                        vx: 0, vy: 0,
+                        poleX: centerX, poleY: centerY,
+                        size: getTokenSize(addr)
+                    });
+                }
+            });
+            currentAngle += stableArc;
+
+            // Position ETH derivatives
+            categoryTokens.eth.forEach((addr, i) => {
+                const angle = currentAngle + (i + 0.5) / Math.max(ethCount, 1) * ethArc;
+                const pos = tokenPositions.get(addr);
+                const targetX = centerX + Math.cos(angle) * circleRadius;
+                const targetY = centerY + Math.sin(angle) * circleRadius;
+                if (pos) {
+                    pos.x = targetX;
+                    pos.y = targetY;
+                    pos.vx = 0;
+                    pos.vy = 0;
+                    pos.poleX = centerX;
+                    pos.poleY = centerY;
+                } else {
+                    tokenPositions.set(addr, {
+                        x: targetX, y: targetY,
+                        vx: 0, vy: 0,
+                        poleX: centerX, poleY: centerY,
+                        size: getTokenSize(addr)
+                    });
+                }
+            });
+            currentAngle += ethArc;
+
+            // Position other tokens
+            categoryTokens.other.forEach((addr, i) => {
+                const angle = currentAngle + (i + 0.5) / Math.max(otherCount, 1) * otherArc;
+                const pos = tokenPositions.get(addr);
+                const targetX = centerX + Math.cos(angle) * circleRadius;
+                const targetY = centerY + Math.sin(angle) * circleRadius;
+                if (pos) {
+                    pos.x = targetX;
+                    pos.y = targetY;
+                    pos.vx = 0;
+                    pos.vy = 0;
+                    pos.poleX = centerX;
+                    pos.poleY = centerY;
+                } else {
+                    tokenPositions.set(addr, {
+                        x: targetX, y: targetY,
+                        vx: 0, vy: 0,
+                        poleX: centerX, poleY: centerY,
+                        size: getTokenSize(addr)
+                    });
+                }
+            });
+        }
+
+        // Handle canvas click for edge selection
+        function handleCanvasClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Don't trigger if we were dragging
+            if (isDragging) return;
+
+            // Check if clicking on a token (don't show order panel)
+            const tokenAddr = findTokenAt(x, y);
+            if (tokenAddr) return;
+
+            // Check if clicking on an edge
+            const edgeResult = findEdgeAt(x, y);
+            if (edgeResult) {
+                showOrderPanel(edgeResult.edge);
+            }
+        }
+
+        // Show order panel for an edge
+        async function showOrderPanel(edge) {
+            const panel = document.getElementById('order-panel');
+            const overlay = document.getElementById('order-panel-overlay');
+            const titleEl = document.getElementById('order-panel-title');
+            const summaryEl = document.getElementById('order-panel-summary');
+            const listEl = document.getElementById('order-list');
+
+            const sellInfo = await getTokenInfo(edge.sellToken);
+            const buyInfo = await getTokenInfo(edge.buyToken);
+
+            // Check for reverse edge (orders going the other direction)
+            const reverseEdgeKey = `${edge.buyToken}-${edge.sellToken}`;
+            const reverseEdge = edges.get(reverseEdgeKey);
+
+            const hasReverseEdge = reverseEdge && reverseEdge.orders.length > 0;
+
+            if (hasReverseEdge) {
+                titleEl.textContent = `${sellInfo.symbol} ↔ ${buyInfo.symbol}`;
+                const totalOrders = edge.orders.length + reverseEdge.orders.length;
+                summaryEl.textContent = `${totalOrders} orders (${edge.orders.length} sell ${sellInfo.symbol}, ${reverseEdge.orders.length} sell ${buyInfo.symbol})`;
+            } else {
+                titleEl.textContent = `${sellInfo.symbol} → ${buyInfo.symbol}`;
+                summaryEl.textContent = `${edge.orders.length} orders | Sell: $${edge.sellVolume.toLocaleString(undefined, {maximumFractionDigits: 0})} | Buy: $${edge.buyVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+            }
+
+            // Get full order details and calculate prices
+            const network = document.getElementById('network').value;
+            const explorerBase = getExplorerUrl(network);
+
+            const orderDetails = await Promise.all(edge.orders.map(async (uid) => {
+                const order = orders.get(uid);
+                if (!order) return null;
+
+                const sellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18 };
+                const buyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18 };
+
+                const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
+                const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
+
+                // Price = buyAmount / sellAmount (how much buy token per sell token)
+                const price = buyAmount / sellAmount;
+
+                return {
+                    uid,
+                    sellAmount,
+                    buyAmount,
+                    price,
+                    sellSymbol: sellInfo.symbol,
+                    buySymbol: buyInfo.symbol,
+                    explorerUrl: `${explorerBase}/orders/${uid}`
+                };
+            }));
+
+            // Filter out nulls and sort by price (best price first = highest buy per sell)
+            const validOrders = orderDetails.filter(o => o !== null);
+            validOrders.sort((a, b) => b.price - a.price);
+
+            // Process reverse edge orders if they exist (these are "bids" from our perspective)
+            let reverseOrders = [];
+            if (hasReverseEdge) {
+                const reverseOrderDetails = await Promise.all(reverseEdge.orders.map(async (uid) => {
+                    const order = orders.get(uid);
+                    if (!order) return null;
+
+                    const sellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18 };
+                    const buyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18 };
+
+                    const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
+                    const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
+
+                    // For reverse orders: they're selling buyInfo.symbol for sellInfo.symbol
+                    // Price from our perspective = 1 / (buyAmount/sellAmount) = sellAmount/buyAmount
+                    const price = sellAmount / buyAmount;
+
+                    return {
+                        uid,
+                        sellAmount: buyAmount, // What they want (our base token)
+                        buyAmount: sellAmount, // What they're offering (our quote token)
+                        price, // Price in our terms (buyInfo.symbol per sellInfo.symbol)
+                        sellSymbol: buyInfo.symbol,
+                        buySymbol: sellInfo.symbol,
+                        originalSellSymbol: buyInfo.symbol,
+                        originalBuySymbol: sellInfo.symbol,
+                        explorerUrl: `${explorerBase}/orders/${uid}`,
+                        isBid: true
+                    };
+                }));
+                reverseOrders = reverseOrderDetails.filter(o => o !== null);
+            }
+
+            // Combine all orders for the list, marking asks and bids
+            const allOrders = [
+                ...validOrders.map(o => ({ ...o, isBid: false })),
+                ...reverseOrders
+            ];
+            allOrders.sort((a, b) => b.price - a.price);
+
+            // Build the order list HTML
+            listEl.innerHTML = allOrders.map(order => `
+                <div class="order-item" style="border-left: 3px solid ${order.isBid ? '#22c55e' : '#ef4444'};">
+                    <div class="order-amounts">
+                        <span class="order-sell">Sell: ${formatAmount(order.isBid ? order.buyAmount : order.sellAmount)} ${order.isBid ? order.buySymbol : order.sellSymbol}</span>
+                        <span class="order-buy">Buy: ${formatAmount(order.isBid ? order.sellAmount : order.buyAmount)} ${order.isBid ? order.sellSymbol : order.buySymbol}</span>
+                    </div>
+                    <div class="order-price">
+                        ${formatPrice(order.price)}<br>
+                        <span style="font-size: 0.7rem; color: #888;">${buyInfo.symbol}/${sellInfo.symbol}</span>
+                    </div>
+                    <a href="${order.explorerUrl}" target="_blank" class="order-link">View ↗</a>
+                </div>
+            `).join('');
+
+            // Reset to depth chart tab
+            switchTab('depth');
+
+            panel.classList.add('visible');
+            overlay.classList.add('visible');
+
+            // Draw depth chart after panel is visible (need timeout for CSS to apply)
+            setTimeout(() => {
+                drawDepthChart(validOrders, reverseOrders, sellInfo.symbol, buyInfo.symbol);
+            }, 50);
+        }
+
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.panel-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`.panel-tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        function drawDepthChart(askOrders, bidOrders, sellSymbol, buySymbol) {
+            const depthCanvas = document.getElementById('depth-chart');
+            const ctx = depthCanvas.getContext('2d');
+            const container = document.getElementById('depth-chart-container');
+
+            // Set canvas size
+            const containerWidth = container.clientWidth || 660;
+            const containerHeight = container.clientHeight || 300;
+            depthCanvas.width = containerWidth;
+            depthCanvas.height = containerHeight;
+
+            const w = depthCanvas.width;
+            const h = depthCanvas.height;
+            const padding = { top: 60, right: 50, bottom: 50, left: 70 };
+            const chartW = w - padding.left - padding.right;
+            const chartH = h - padding.top - padding.bottom;
+
+            // Clear canvas
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fillRect(0, 0, w, h);
+
+            const hasAsks = askOrders && askOrders.length > 0;
+            const hasBids = bidOrders && bidOrders.length > 0;
+
+            if (!hasAsks && !hasBids) {
+                ctx.fillStyle = '#888';
+                ctx.font = '14px Segoe UI';
+                ctx.textAlign = 'center';
+                ctx.fillText('No orders to display', w / 2, h / 2);
+                return;
+            }
+
+            // Sort asks by price (low to high) - these are sell orders
+            const sortedAsks = hasAsks ? [...askOrders].sort((a, b) => a.price - b.price) : [];
+            // Sort bids by price (high to low) - these are buy orders (reverse direction)
+            const sortedBids = hasBids ? [...bidOrders].sort((a, b) => b.price - a.price) : [];
+
+            // Calculate cumulative depth for asks (from lowest price upward)
+            let cumulativeAsks = [];
+            let askCumSum = 0;
+            for (const order of sortedAsks) {
+                cumulativeAsks.push({ price: order.price, depth: askCumSum });
+                askCumSum += order.sellAmount;
+            }
+            if (sortedAsks.length > 0) {
+                cumulativeAsks.push({ price: sortedAsks[sortedAsks.length - 1].price, depth: askCumSum });
+            }
+
+            // Calculate cumulative depth for bids (from highest price downward)
+            let cumulativeBids = [];
+            let bidCumSum = 0;
+            for (const order of sortedBids) {
+                cumulativeBids.push({ price: order.price, depth: bidCumSum });
+                bidCumSum += order.sellAmount; // sellAmount here is what they're offering
+            }
+            if (sortedBids.length > 0) {
+                cumulativeBids.push({ price: sortedBids[sortedBids.length - 1].price, depth: bidCumSum });
+            }
+
+            // Find price range across both sides
+            const allPrices = [
+                ...sortedAsks.map(o => o.price),
+                ...sortedBids.map(o => o.price)
+            ];
+            const minPrice = Math.min(...allPrices);
+            const maxPrice = Math.max(...allPrices);
+            let priceRange = maxPrice - minPrice;
+
+            if (priceRange < minPrice * 0.001) {
+                priceRange = minPrice * 0.01;
+            }
+
+            const midPrice = (minPrice + maxPrice) / 2;
+            const extendedMin = minPrice - priceRange * 0.3;
+            const extendedMax = maxPrice + priceRange * 0.3;
+
+            const maxDepth = Math.max(askCumSum, bidCumSum);
+
+            // Update mid price display
+            document.getElementById('depth-mid-price').textContent = formatPrice(midPrice);
+
+            // Scale functions
+            const scaleX = (price) => padding.left + ((price - extendedMin) / (extendedMax - extendedMin)) * chartW;
+            const scaleY = (depth) => padding.top + chartH - (depth / maxDepth) * chartH;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i <= 5; i++) {
+                const y = padding.top + (i / 5) * chartH;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(w - padding.right, y);
+                ctx.stroke();
+
+                const depthVal = maxDepth * (1 - i / 5);
+                ctx.fillStyle = '#888';
+                ctx.font = '10px Segoe UI';
+                ctx.textAlign = 'right';
+                ctx.fillText(formatAmount(depthVal), padding.left - 8, y + 3);
+            }
+
+            for (let i = 0; i <= 6; i++) {
+                const x = padding.left + (i / 6) * chartW;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, h - padding.bottom);
+                ctx.stroke();
+
+                const priceVal = extendedMin + (i / 6) * (extendedMax - extendedMin);
+                ctx.fillStyle = '#888';
+                ctx.font = '10px Segoe UI';
+                ctx.textAlign = 'center';
+                ctx.fillText(priceVal.toFixed(4), x, h - padding.bottom + 15);
+            }
+
+            // Draw mid price line
+            const midX = scaleX(midPrice);
+            ctx.strokeStyle = '#ffffff40';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(midX, padding.top);
+            ctx.lineTo(midX, h - padding.bottom);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw bids (green, left side) - cumulative from high price to low
+            if (cumulativeBids.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleY(0));
+
+                for (let i = 0; i < cumulativeBids.length - 1; i++) {
+                    const curr = cumulativeBids[i];
+                    const next = cumulativeBids[i + 1];
+                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                }
+                const lastBid = cumulativeBids[cumulativeBids.length - 1];
+                ctx.lineTo(scaleX(lastBid.price), scaleY(lastBid.depth));
+                ctx.lineTo(scaleX(extendedMin), scaleY(lastBid.depth));
+                ctx.lineTo(scaleX(extendedMin), scaleY(0));
+                ctx.closePath();
+
+                const bidGradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+                bidGradient.addColorStop(0, '#22c55e60');
+                bidGradient.addColorStop(1, '#22c55e15');
+                ctx.fillStyle = bidGradient;
+                ctx.fill();
+
+                // Draw bid line
+                ctx.beginPath();
+                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleY(0));
+                for (let i = 0; i < cumulativeBids.length - 1; i++) {
+                    const curr = cumulativeBids[i];
+                    const next = cumulativeBids[i + 1];
+                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                }
+                ctx.lineTo(scaleX(cumulativeBids[cumulativeBids.length - 1].price), scaleY(cumulativeBids[cumulativeBids.length - 1].depth));
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Dots for bids
+                ctx.fillStyle = '#22c55e';
+                for (const point of cumulativeBids) {
+                    ctx.beginPath();
+                    ctx.arc(scaleX(point.price), scaleY(point.depth), 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Draw asks (red, right side) - cumulative from low price to high
+            if (cumulativeAsks.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleY(0));
+
+                for (let i = 0; i < cumulativeAsks.length - 1; i++) {
+                    const curr = cumulativeAsks[i];
+                    const next = cumulativeAsks[i + 1];
+                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                }
+                const lastAsk = cumulativeAsks[cumulativeAsks.length - 1];
+                ctx.lineTo(scaleX(lastAsk.price), scaleY(lastAsk.depth));
+                ctx.lineTo(scaleX(extendedMax), scaleY(lastAsk.depth));
+                ctx.lineTo(scaleX(extendedMax), scaleY(0));
+                ctx.closePath();
+
+                const askGradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+                askGradient.addColorStop(0, '#ef444460');
+                askGradient.addColorStop(1, '#ef444415');
+                ctx.fillStyle = askGradient;
+                ctx.fill();
+
+                // Draw ask line
+                ctx.beginPath();
+                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleY(0));
+                for (let i = 0; i < cumulativeAsks.length - 1; i++) {
+                    const curr = cumulativeAsks[i];
+                    const next = cumulativeAsks[i + 1];
+                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                }
+                ctx.lineTo(scaleX(cumulativeAsks[cumulativeAsks.length - 1].price), scaleY(cumulativeAsks[cumulativeAsks.length - 1].depth));
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Dots for asks
+                ctx.fillStyle = '#ef4444';
+                for (const point of cumulativeAsks) {
+                    ctx.beginPath();
+                    ctx.arc(scaleX(point.price), scaleY(point.depth), 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Draw axis labels
+            ctx.fillStyle = '#aaa';
+            ctx.font = '11px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Price (${buySymbol} per ${sellSymbol})`, w / 2, h - 8);
+
+            ctx.save();
+            ctx.translate(15, h / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(`Cumulative Volume`, 0, 0);
+            ctx.restore();
+
+            // Draw legend in top corners
+            if (hasBids) {
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 11px Segoe UI';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Bids (${sortedBids.length})`, padding.left, padding.top - 15);
+            }
+            if (hasAsks) {
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 11px Segoe UI';
+                ctx.textAlign = 'right';
+                ctx.fillText(`Asks (${sortedAsks.length})`, w - padding.right, padding.top - 15);
+            }
+        }
+
+        function closeOrderPanel() {
+            document.getElementById('order-panel').classList.remove('visible');
+            document.getElementById('order-panel-overlay').classList.remove('visible');
+        }
+
+        function getExplorerUrl(network) {
+            const urls = {
+                'mainnet': 'https://explorer.cow.fi',
+                'xdai': 'https://explorer.cow.fi/gc',
+                'arbitrum_one': 'https://explorer.cow.fi/arb1',
+                'base': 'https://explorer.cow.fi/base',
+                'bsc': 'https://explorer.cow.fi/bnb'
+            };
+            return urls[network] || urls['mainnet'];
+        }
+
+        function formatAmount(amount) {
+            if (amount >= 1000000) return (amount / 1000000).toFixed(2) + 'M';
+            if (amount >= 1000) return (amount / 1000).toFixed(2) + 'K';
+            if (amount >= 1) return amount.toFixed(4);
+            if (amount >= 0.0001) return amount.toFixed(6);
+            return amount.toExponential(2);
+        }
+
+        function formatPrice(price) {
+            if (price >= 1000000) return (price / 1000000).toFixed(2) + 'M';
+            if (price >= 1000) return (price / 1000).toFixed(2) + 'K';
+            if (price >= 1) return price.toFixed(4);
+            if (price >= 0.0001) return price.toFixed(6);
+            return price.toExponential(2);
+        }
+
+        // Initialize
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('click', handleCanvasClick);
+        canvas.addEventListener('mouseleave', () => {
+            if (isDragging) {
+                draggedToken = null;
+                draggedPole = null;
+                isDragging = false;
+                canvas.classList.remove('dragging');
+            }
+            hoveredToken = null;
+            hoveredEdge = null;
+            hideTooltip();
+        });
+        // Also handle mouseup on window in case mouse leaves canvas while dragging
+        window.addEventListener('mouseup', handleMouseUp);
+
+        document.getElementById('network').addEventListener('change', () => {
+            tokens.clear();
+            edges.clear();
+            orders.clear();
+            tokenPositions.clear();
+            tokenPriceCache.clear();
+            fetchOrders();
+        });
+
+        resizeCanvas();
+        fetchOrders();
+        setInterval(fetchOrders, 10000); // Reduced frequency to avoid disrupting physics
+    </script>
+</body>
+</html>
