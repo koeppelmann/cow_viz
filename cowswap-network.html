@@ -2388,19 +2388,32 @@
 
                 document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
 
-                // Fetch order details
-                const orderPromises = orderUids.slice(0, 50).map(async uid => {
-                    try {
-                        const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
-                        if (orderRes.ok) {
-                            return await orderRes.json();
-                        }
-                    } catch (e) {}
-                    return null;
-                });
+                // Fetch order details in batches to handle large order counts
+                const allOrders = [];
+                const batchSize = 50;
 
-                const orderList = (await Promise.all(orderPromises)).filter(o => o && o.status === 'open');
-                await processOrders(orderList);
+                for (let i = 0; i < orderUids.length; i += batchSize) {
+                    const batch = orderUids.slice(i, i + batchSize);
+                    const orderPromises = batch.map(async uid => {
+                        try {
+                            const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
+                            if (orderRes.ok) {
+                                return await orderRes.json();
+                            }
+                        } catch (e) {}
+                        return null;
+                    });
+
+                    const batchResults = await Promise.all(orderPromises);
+                    allOrders.push(...batchResults.filter(o => o && o.status === 'open'));
+
+                    // Small delay between batches to avoid rate limiting
+                    if (i + batchSize < orderUids.length) {
+                        await new Promise(r => setTimeout(r, 100));
+                    }
+                }
+
+                await processOrders(allOrders);
                 // Physics loop handles drawing
 
             } catch (error) {
