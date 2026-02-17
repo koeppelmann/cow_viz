@@ -1666,26 +1666,23 @@
             }
         }
 
-        async function processOrders(orderList) {
-            tokens.clear();
-            edges.clear();
-            orders.clear();
-
+        // Process new orders (adds to existing data, doesn't clear)
+        async function processNewOrders(orderList) {
             const network = document.getElementById('network').value;
 
-            // First pass: collect all tokens
-            const allTokens = new Set();
+            // First pass: collect all new tokens
+            const newTokens = new Set();
             orderList.forEach(order => {
-                allTokens.add(order.sellToken.toLowerCase());
-                allTokens.add(order.buyToken.toLowerCase());
+                newTokens.add(order.sellToken.toLowerCase());
+                newTokens.add(order.buyToken.toLowerCase());
             });
 
             // Filter to only unknown tokens (not in KNOWN_TOKENS and not already cached)
-            const unknownTokens = Array.from(allTokens).filter(addr =>
+            const unknownTokens = Array.from(newTokens).filter(addr =>
                 !KNOWN_TOKENS[addr] && !tokenInfoCache.has(addr)
             );
 
-            console.log(`[processOrders] ${allTokens.size} tokens, ${unknownTokens.length} unknown`);
+            console.log(`[processNewOrders] ${orderList.length} new orders, ${unknownTokens.length} unknown tokens`);
 
             // Fetch unknown token symbols from RPC (batch of 5 at a time)
             for (let i = 0; i < unknownTokens.length; i += 5) {
@@ -1693,17 +1690,17 @@
                 await Promise.all(batch.map(addr => fetchTokenInfo(addr, network)));
             }
 
-            // First, fetch the native ETH price (used for all ETH derivatives)
+            // Fetch the native ETH price if not cached
             await fetchEthPrice();
 
-            // Fetch prices for all tokens (in parallel, with rate limiting)
-            const tokenArray = Array.from(allTokens);
+            // Fetch prices for new tokens (in parallel, with rate limiting)
+            const tokenArray = Array.from(newTokens);
             for (let i = 0; i < tokenArray.length; i += 5) {
                 const batch = tokenArray.slice(i, i + 5);
                 await Promise.all(batch.map(addr => fetchTokenPrice(addr, network)));
             }
 
-            // Second pass: process orders with prices
+            // Second pass: add new orders to existing data
             orderList.forEach(order => {
                 const sellToken = order.sellToken.toLowerCase();
                 const buyToken = order.buyToken.toLowerCase();
@@ -1723,7 +1720,9 @@
                 }
                 const sellTokenData = tokens.get(sellToken);
                 sellTokenData.totalSellVolume += sellValue;
-                sellTokenData.orders.push(order.uid);
+                if (!sellTokenData.orders.includes(order.uid)) {
+                    sellTokenData.orders.push(order.uid);
+                }
 
                 // Update buy token
                 if (!tokens.has(buyToken)) {
@@ -1736,7 +1735,9 @@
                 }
                 const buyTokenData = tokens.get(buyToken);
                 buyTokenData.totalBuyVolume += buyValue;
-                buyTokenData.orders.push(order.uid);
+                if (!buyTokenData.orders.includes(order.uid)) {
+                    buyTokenData.orders.push(order.uid);
+                }
 
                 // Update edge
                 const edgeKey = `${sellToken}-${buyToken}`;
@@ -1746,12 +1747,26 @@
                 const edge = edges.get(edgeKey);
                 edge.sellVolume += sellValue;
                 edge.buyVolume += buyValue;
-                edge.orders.push(order.uid);
+                if (!edge.orders.includes(order.uid)) {
+                    edge.orders.push(order.uid);
+                }
             });
 
             updateTokenPositions();
-            updateStats();
-            updateTokenList();
+        }
+
+        // Full rebuild (used on network change)
+        async function processOrders(orderList) {
+            tokens.clear();
+            edges.clear();
+            orders.clear();
+            knownOrderUids.clear();
+
+            // Add all orders to known set
+            orderList.forEach(order => knownOrderUids.add(order.uid));
+
+            // Use the incremental function to process
+            await processNewOrders(orderList);
         }
 
         function updateStats() {
@@ -2375,6 +2390,9 @@
             document.getElementById('tooltip').style.display = 'none';
         }
 
+        // Track known orders to accumulate over time (like 3D view)
+        let knownOrderUids = new Set();
+
         async function fetchOrders() {
             const network = document.getElementById('network').value;
             const apiNetwork = getApiNetwork(network);
@@ -2388,12 +2406,15 @@
 
                 document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
 
-                // Fetch order details in batches to handle large order counts
-                const allOrders = [];
-                const batchSize = 50;
+                // Find new orders (not already known)
+                const newOrderUids = orderUids.filter(uid => !knownOrderUids.has(uid));
 
-                for (let i = 0; i < orderUids.length; i += batchSize) {
-                    const batch = orderUids.slice(i, i + batchSize);
+                // Fetch new order details in batches
+                const newOrders = [];
+                const batchSize = 20;
+
+                for (let i = 0; i < newOrderUids.length; i += batchSize) {
+                    const batch = newOrderUids.slice(i, i + batchSize);
                     const orderPromises = batch.map(async uid => {
                         try {
                             const orderRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v1/orders/${uid}`);
@@ -2405,16 +2426,32 @@
                     });
 
                     const batchResults = await Promise.all(orderPromises);
-                    allOrders.push(...batchResults.filter(o => o && o.status === 'open'));
+                    newOrders.push(...batchResults.filter(o => o && o.status === 'open'));
 
                     // Small delay between batches to avoid rate limiting
-                    if (i + batchSize < orderUids.length) {
+                    if (i + batchSize < newOrderUids.length) {
                         await new Promise(r => setTimeout(r, 100));
                     }
                 }
 
-                await processOrders(allOrders);
-                // Physics loop handles drawing
+                // Add new orders to known set
+                newOrders.forEach(order => knownOrderUids.add(order.uid));
+
+                // Check for filled/expired orders (no longer in auction)
+                const removedUids = [...knownOrderUids].filter(uid => !orderUids.includes(uid));
+                for (const uid of removedUids) {
+                    knownOrderUids.delete(uid);
+                    orders.delete(uid);
+                }
+
+                // Process only if we have new orders
+                if (newOrders.length > 0) {
+                    await processNewOrders(newOrders);
+                }
+
+                // Update stats even if no new orders
+                updateStats();
+                updateTokenList();
 
             } catch (error) {
                 console.error('Error fetching orders:', error);
@@ -3033,6 +3070,7 @@
             tokens.clear();
             edges.clear();
             orders.clear();
+            knownOrderUids.clear();
             tokenPositions.clear();
             tokenPriceCache.clear();
             fetchOrders();
