@@ -2409,9 +2409,11 @@
                 // Find new orders (not already known)
                 const newOrderUids = orderUids.filter(uid => !knownOrderUids.has(uid));
 
-                // Fetch new order details in batches
+                console.log(`[fetchOrders] Total orders in auction: ${orderUids.length}, new orders: ${newOrderUids.length}, known: ${knownOrderUids.size}`);
+
+                // Fetch new order details in batches (larger batches, fetch all)
                 const newOrders = [];
-                const batchSize = 20;
+                const batchSize = 50;
 
                 for (let i = 0; i < newOrderUids.length; i += batchSize) {
                     const batch = newOrderUids.slice(i, i + batchSize);
@@ -2428,11 +2430,18 @@
                     const batchResults = await Promise.all(orderPromises);
                     newOrders.push(...batchResults.filter(o => o && o.status === 'open'));
 
+                    // Update stats as we go so user sees progress
+                    if (newOrders.length > 0) {
+                        document.getElementById('order-count').textContent = orders.size + newOrders.length;
+                    }
+
                     // Small delay between batches to avoid rate limiting
                     if (i + batchSize < newOrderUids.length) {
-                        await new Promise(r => setTimeout(r, 100));
+                        await new Promise(r => setTimeout(r, 50));
                     }
                 }
+
+                console.log(`[fetchOrders] Fetched ${newOrders.length} new orders`);
 
                 // Add new orders to known set
                 newOrders.forEach(order => knownOrderUids.add(order.uid));
