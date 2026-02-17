@@ -1499,8 +1499,15 @@
             return 12 + (totalVolume / maxVolume) * 20;
         }
 
+        // Minimum number of orders for a token to be displayed
+        const MIN_ORDERS_TO_DISPLAY = 2;
+
         function updateTokenPositions() {
-            const tokenList = Array.from(tokens.keys());
+            // Filter tokens: only show tokens with at least MIN_ORDERS_TO_DISPLAY orders
+            const tokenList = Array.from(tokens.keys()).filter(addr => {
+                const tokenData = tokens.get(addr);
+                return tokenData && tokenData.orders.length >= MIN_ORDERS_TO_DISPLAY;
+            });
             const count = tokenList.length;
             if (count === 0) return;
 
@@ -1771,7 +1778,10 @@
 
         function updateStats() {
             document.getElementById('order-count').textContent = orders.size;
-            document.getElementById('token-count').textContent = tokens.size;
+
+            // Show filtered token count (tokens with >= MIN_ORDERS_TO_DISPLAY orders)
+            const displayedTokens = Array.from(tokens.values()).filter(t => t.orders.length >= MIN_ORDERS_TO_DISPLAY).length;
+            document.getElementById('token-count').textContent = displayedTokens;
 
             let totalVolume = 0;
             tokens.forEach(t => totalVolume += t.totalSellVolume);
