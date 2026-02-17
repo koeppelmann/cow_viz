@@ -3005,8 +3005,14 @@
             overlay.classList.add('visible');
 
             // Draw depth chart after panel is visible (need timeout for CSS to apply)
+            // When flipped, swap asks and bids so chart maintains correct visual layout
+            // (bids on left at lower prices, asks on right at higher prices)
             setTimeout(() => {
-                drawDepthChart(validOrders, reverseOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
+                if (currentPanelFlipped) {
+                    drawDepthChart(reverseOrders, validOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
+                } else {
+                    drawDepthChart(validOrders, reverseOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
+                }
             }, 50);
         }
 
