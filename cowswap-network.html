@@ -84,6 +84,34 @@
         canvas {
             display: block;
         }
+        #api-warning {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(40, 20, 10, 0.95);
+            border: 1px solid #f97316;
+            border-radius: 8px;
+            padding: 10px 20px;
+            z-index: 500;
+            color: #f97316;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            max-width: 600px;
+        }
+        #api-warning button {
+            background: none;
+            border: none;
+            color: #f97316;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        #api-warning button:hover {
+            color: #fff;
+        }
         #tooltip {
             position: fixed;
             background: rgba(20, 20, 40, 0.95);
@@ -624,6 +652,11 @@
             <button id="layout-toggle" onclick="toggleLayout()">Circle View</button>
             <button onclick="resetView()">Reset View</button>
         </div>
+    </div>
+
+    <div id="api-warning" style="display:none;">
+        <span id="api-warning-text"></span>
+        <button onclick="document.getElementById('api-warning').style.display='none'">&times;</button>
     </div>
 
     <div id="canvas-container">
@@ -3039,6 +3072,23 @@
             document.getElementById('tooltip').style.display = 'none';
         }
 
+        // API warning banner
+        let apiWarningTimeout = null;
+        function showApiWarning(message) {
+            const el = document.getElementById('api-warning');
+            document.getElementById('api-warning-text').textContent = '⚠ ' + message;
+            el.style.display = 'flex';
+            // Auto-hide after 15 seconds
+            if (apiWarningTimeout) clearTimeout(apiWarningTimeout);
+            apiWarningTimeout = setTimeout(() => {
+                el.style.display = 'none';
+            }, 15000);
+        }
+        function hideApiWarning() {
+            document.getElementById('api-warning').style.display = 'none';
+            if (apiWarningTimeout) clearTimeout(apiWarningTimeout);
+        }
+
         // Track known orders to accumulate over time (like 3D view)
         let knownOrderUids = new Set();  // Orders currently displayed
         let pendingOrderUids = []; // Orders waiting to be fetched
@@ -3109,7 +3159,14 @@
 
             try {
                 const auctionRes = await fetch(`https://api.cow.fi/${apiNetwork}/api/v2/solver_competition/latest`);
-                if (!auctionRes.ok) return;
+                if (!auctionRes.ok) {
+                    if (auctionRes.status === 429) {
+                        showApiWarning('CoW API rate limited — auction data temporarily unavailable. Retrying in 30s...');
+                    } else {
+                        showApiWarning(`CoW API error (${auctionRes.status}) — you may be rate limited. Retrying in 30s...`);
+                    }
+                    return;
+                }
 
                 const auctionData = await auctionRes.json();
                 const orderUids = auctionData.auction?.orders || [];
@@ -3163,6 +3220,7 @@
 
             } catch (error) {
                 console.error('Error fetching auction:', error);
+                showApiWarning('Failed to reach CoW API — check your connection or you may be rate limited. Retrying in 30s...');
             }
         }
 
@@ -3189,6 +3247,7 @@
                         pendingOrderUids.unshift(uid);
                         currentFetchDelay = Math.min(currentFetchDelay * 2, MAX_FETCH_DELAY);
                         console.log(`[fetch] Rate limited! Slowing to ${currentFetchDelay}ms, ${pendingOrderUids.length} pending`);
+                        showApiWarning(`Rate limited by CoW API — slowing down. ${pendingOrderUids.length} orders pending, fetching every ${(currentFetchDelay/1000).toFixed(1)}s...`);
                         // Take a longer break when rate limited
                         await new Promise(r => setTimeout(r, currentFetchDelay * 2));
                         continue;
@@ -3219,6 +3278,7 @@
                     // Network error - put back in queue
                     pendingOrderUids.push(uid);
                     console.error('[fetch] Network error:', e);
+                    showApiWarning('Network error fetching orders — check your connection or you may be rate limited.');
                 }
 
                 // Wait between each request
