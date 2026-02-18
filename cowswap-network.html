@@ -2536,7 +2536,46 @@
 
         // Persistent cache for order details - survives even when orders leave auction
         // This prevents re-fetching orders we've already looked up
+        // Uses localStorage to persist across page refreshes
         const orderDetailsCache = new Map();
+
+        // Load cache from localStorage on startup
+        function loadOrderCache() {
+            try {
+                const cached = localStorage.getItem('cowOrderCache');
+                if (cached) {
+                    const entries = JSON.parse(cached);
+                    for (const [uid, order] of entries) {
+                        orderDetailsCache.set(uid, order);
+                    }
+                    console.log(`[cache] Loaded ${orderDetailsCache.size} orders from localStorage`);
+                }
+            } catch (e) {
+                console.error('[cache] Failed to load cache:', e);
+            }
+        }
+
+        // Save cache to localStorage (debounced)
+        let saveTimeout = null;
+        function saveOrderCache() {
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                try {
+                    const entries = Array.from(orderDetailsCache.entries());
+                    localStorage.setItem('cowOrderCache', JSON.stringify(entries));
+                    console.log(`[cache] Saved ${entries.length} orders to localStorage`);
+                } catch (e) {
+                    console.error('[cache] Failed to save cache:', e);
+                    // If storage is full, clear old entries
+                    if (e.name === 'QuotaExceededError') {
+                        localStorage.removeItem('cowOrderCache');
+                    }
+                }
+            }, 2000); // Save 2 seconds after last update
+        }
+
+        // Load cache on startup
+        loadOrderCache();
 
         // Fetch orders from the auction list
         async function fetchOrders() {
@@ -2635,6 +2674,7 @@
                         if (order && order.status === 'open') {
                             // Cache the order details for future use
                             orderDetailsCache.set(order.uid, order);
+                            saveOrderCache(); // Persist to localStorage
                             knownOrderUids.add(order.uid);
                             await processNewOrders([order]);
                             fetchedCount++;
@@ -3394,6 +3434,7 @@
         });
 
         resizeCanvas();
+        updateStats(); // Show cached count on load
         fetchOrders();
         setInterval(fetchOrders, 30000); // Poll auction every 30 seconds to reduce API load
     </script>
