@@ -1508,7 +1508,19 @@
                 }
             }
 
-            // Try CoinGecko by known ID first (most reliable)
+            // Try CoW Protocol native price API FIRST (no CORS issues, fast)
+            const nativePrice = await fetchNativePriceFromCow(addr, network);
+            if (nativePrice && nativePrice > 0) {
+                const ethPrice = await fetchEthPrice();
+                const calculatedUsdPrice = nativePrice * ethPrice;
+                // Sanity check - if price seems unreasonable, skip it
+                if (calculatedUsdPrice > 0.0000001 && calculatedUsdPrice < 1000000) {
+                    tokenPriceCache.set(addr, { price: calculatedUsdPrice, timestamp: Date.now() });
+                    return calculatedUsdPrice;
+                }
+            }
+
+            // Try CoinGecko by known ID (most reliable, but may have CORS/rate limits)
             const coinGeckoId = COINGECKO_IDS[addr];
             if (coinGeckoId) {
                 const idPrice = await fetchPriceFromCoinGeckoById(coinGeckoId);
@@ -1519,26 +1531,8 @@
                 }
             }
 
-            // Try CoinGecko for other tokens by contract address
-            const usdPrice = await fetchPriceFromCoinGecko(addr, network);
-            if (usdPrice && usdPrice > 0) {
-                tokenPriceCache.set(addr, { price: usdPrice, timestamp: Date.now() });
-                return usdPrice;
-            }
-
-            // Try CoW Protocol native price API as fallback
-            const nativePrice = await fetchNativePriceFromCow(addr, network);
-            if (nativePrice && nativePrice > 0) {
-                // The CoW API returns price in ETH (how much ETH per 1 token)
-                // nativePrice is already normalized (1 token = X ETH)
-                const ethPrice = await fetchEthPrice();
-                const calculatedUsdPrice = nativePrice * ethPrice;
-                // Sanity check - if price seems unreasonable, skip it
-                if (calculatedUsdPrice > 0.0000001 && calculatedUsdPrice < 1000000) {
-                    tokenPriceCache.set(addr, { price: calculatedUsdPrice, timestamp: Date.now() });
-                    return calculatedUsdPrice;
-                }
-            }
+            // Skip CoinGecko contract lookup - it causes CORS errors and rate limits
+            // The CoW API native_price should cover most tokens
 
             // Fallback: no price available
             tokenPriceCache.set(addr, { price: 0, timestamp: Date.now() });
@@ -1837,23 +1831,14 @@
 
             console.log(`[processNewOrders] ${orderList.length} new orders, ${unknownTokens.length} unknown tokens`);
 
-            // Fetch unknown token symbols from RPC (batch of 5 at a time)
+            // Fetch unknown token symbols from RPC (batch of 5 at a time) - this is fast
             for (let i = 0; i < unknownTokens.length; i += 5) {
                 const batch = unknownTokens.slice(i, i + 5);
                 await Promise.all(batch.map(addr => fetchTokenInfo(addr, network)));
             }
 
-            // Fetch the native ETH price if not cached
-            await fetchEthPrice();
-
-            // Fetch prices for new tokens (in parallel, with rate limiting)
-            const tokenArray = Array.from(newTokens);
-            for (let i = 0; i < tokenArray.length; i += 5) {
-                const batch = tokenArray.slice(i, i + 5);
-                await Promise.all(batch.map(addr => fetchTokenPrice(addr, network)));
-            }
-
-            // Second pass: add new orders to existing data
+            // Add orders to data structure FIRST (don't wait for prices)
+            // This allows the visualization to appear immediately
             orderList.forEach(order => {
                 const sellToken = order.sellToken.toLowerCase();
                 const buyToken = order.buyToken.toLowerCase();
@@ -1906,6 +1891,40 @@
             });
 
             updateTokenPositions();
+
+            // Fetch prices in background (don't block visualization)
+            // Use CoW API native_price which doesn't have CORS issues
+            fetchPricesInBackground(Array.from(newTokens), network);
+        }
+
+        // Fetch prices in background without blocking UI
+        let pricesFetchingInProgress = false;
+        async function fetchPricesInBackground(tokenAddresses, network) {
+            if (pricesFetchingInProgress) return;
+            pricesFetchingInProgress = true;
+
+            try {
+                // First get ETH price (needed for conversion)
+                await fetchEthPrice();
+
+                // Fetch prices one at a time with delays to avoid rate limiting
+                // Prioritize CoW API native_price (no CORS issues)
+                for (const addr of tokenAddresses) {
+                    // Skip if already cached
+                    const cached = tokenPriceCache.get(addr);
+                    if (cached && Date.now() - cached.timestamp < 60000) continue;
+
+                    // Try to fetch price (will try CoW API first, then CoinGecko)
+                    await fetchTokenPrice(addr, network);
+
+                    // Small delay to avoid rate limiting
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            } catch (e) {
+                console.error('[prices] Background fetch error:', e);
+            } finally {
+                pricesFetchingInProgress = false;
+            }
         }
 
         // Full rebuild (used on network change)
