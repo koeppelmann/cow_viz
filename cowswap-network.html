@@ -487,6 +487,95 @@
         .depth-legend-dot.asks {
             background: #ef4444;
         }
+        .depth-range-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            font-size: 0.75rem;
+        }
+        .depth-range-control label {
+            color: #888;
+            white-space: nowrap;
+        }
+        .depth-range-control input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        .depth-range-control .range-value {
+            color: #fff;
+            min-width: 80px;
+            text-align: right;
+            font-family: monospace;
+        }
+        .depth-range-control button {
+            padding: 4px 8px;
+            background: #333;
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.7rem;
+        }
+        .depth-range-control button:hover {
+            background: #444;
+        }
+        #depth-chart-tooltip {
+            position: absolute;
+            background: rgba(20, 20, 40, 0.95);
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.75rem;
+            color: #fff;
+            pointer-events: auto;
+            z-index: 1000;
+            display: none;
+            max-width: 280px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        #depth-chart-tooltip.visible {
+            display: block;
+        }
+        #depth-chart-tooltip:hover {
+            display: block;
+        }
+        .depth-tooltip-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #333;
+        }
+        .depth-tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 2px 0;
+        }
+        .depth-tooltip-label {
+            color: #888;
+        }
+        .depth-tooltip-link {
+            display: block;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #333;
+            color: #22c55e;
+            text-decoration: none;
+            font-size: 0.7rem;
+        }
+        .depth-tooltip-link:hover {
+            text-decoration: underline;
+        }
+        #depth-chart {
+            cursor: crosshair;
+        }
     </style>
 </head>
 <body>
@@ -608,6 +697,7 @@
         <div id="tab-depth" class="tab-content active">
             <div id="depth-chart-container">
                 <canvas id="depth-chart"></canvas>
+                <div id="depth-chart-tooltip"></div>
                 <div class="depth-chart-info">
                     <div class="depth-mid-price" id="depth-mid-price">-</div>
                     <div class="depth-mid-label">Mid Market Price</div>
@@ -623,6 +713,13 @@
                     <div class="depth-legend-dot asks"></div>
                     <span>Asks (sell orders)</span>
                 </div>
+            </div>
+            <div class="depth-range-control">
+                <label>Price Range:</label>
+                <input type="range" id="depth-range-slider" min="0" max="100" value="60" oninput="updateDepthRange()">
+                <span class="range-value" id="depth-range-value">±100%</span>
+                <button onclick="resetDepthRange()">Reset</button>
+                <button onclick="showAllOrders()">Show All</button>
             </div>
         </div>
         <div id="tab-orders" class="tab-content">
@@ -941,6 +1038,18 @@
         let currentPanelBaseToken = null;  // The "base" token (price is X per 1 base)
         let currentPanelQuoteToken = null; // The "quote" token
 
+        // Depth chart state
+        let depthChartAskOrders = [];
+        let depthChartBidOrders = [];
+        let depthChartBaseSymbol = '';
+        let depthChartQuoteSymbol = '';
+        let depthRangePercent = 100;  // ±100% around mid price by default
+        let depthShowAll = false;     // Override to show all orders
+
+        // Depth chart interactive state - stores order positions for hover
+        let depthChartOrderPoints = [];  // [{x, y, order, isBid}]
+        let depthChartPadding = null;    // Chart padding for coordinate conversion
+
         // Custom pole positions (can be dragged by user)
         let polePositions = null; // Will be initialized in resizeCanvas
 
@@ -990,6 +1099,15 @@
 
         function getTokenCategory(address) {
             const addr = address.toLowerCase();
+            const network = document.getElementById('network')?.value || 'mainnet';
+
+            // Handle native token (0xeeee...) - category depends on network
+            // On Gnosis, native token is xDAI (stablecoin), on other chains it's ETH
+            if (addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+                const nativeInfo = NATIVE_TOKENS[network] || NATIVE_TOKENS['mainnet'];
+                return nativeInfo.category || 'eth';
+            }
+
             // Check by address first
             if (STABLECOINS.has(addr)) return 'stable';
             if (ETH_DERIVATIVES.has(addr)) return 'eth';
@@ -1071,6 +1189,13 @@
 
         function getApiNetwork(network) {
             return API_NETWORK_MAP[network] || network;
+        }
+
+        // Check if network's native token is a stablecoin (xDAI on Gnosis, GHO on Lens)
+        // On these networks, native_price already represents USD value (no ETH conversion needed)
+        function isNativeStablecoin(network) {
+            const nativeInfo = NATIVE_TOKENS[network] || NATIVE_TOKENS['mainnet'];
+            return nativeInfo.category === 'stable';
         }
 
         // ERC20 symbol() function selector
@@ -1475,11 +1600,9 @@
                 console.warn('Failed to fetch ETH price from CoinGecko:', e);
             }
 
-            // Fallback - but mark as stale so we retry sooner
-            console.warn('Using fallback ETH price');
-            const fallback = 2500;
-            tokenPriceCache.set('_eth_native', { price: fallback, timestamp: Date.now() - 30000 }); // Only cache for 30s
-            return fallback;
+            // No fallback - return null if we can't get real price
+            console.warn('Could not fetch ETH price from any source');
+            return null;
         }
 
         async function fetchTokenPrice(address, network) {
@@ -1508,15 +1631,26 @@
                 return 1;
             }
 
-            // Native ETH placeholder
+            // Native token (0xeeee...) - price depends on network
             if (addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+                // On networks with stablecoin as native (Gnosis=xDAI, Lens=GHO), price is $1
+                if (isNativeStablecoin(network)) {
+                    tokenPriceCache.set(addr, { price: 1, timestamp: Date.now() });
+                    return 1;
+                }
+                // On other networks (mainnet, Arbitrum, Base, etc.), get ETH price
                 const ethPrice = await fetchEthPrice();
-                tokenPriceCache.set(addr, { price: ethPrice, timestamp: Date.now() });
-                return ethPrice;
+                if (ethPrice && ethPrice > 0) {
+                    tokenPriceCache.set(addr, { price: ethPrice, timestamp: Date.now() });
+                    return ethPrice;
+                }
+                // No price available - don't cache, return 0
+                return 0;
             }
 
             // ETH derivatives - try to get actual price from CoW API
-            if (ETH_DERIVATIVES.has(addr)) {
+            // (only relevant on ETH-native networks, not on stablecoin-native like Gnosis)
+            if (ETH_DERIVATIVES.has(addr) && !isNativeStablecoin(network)) {
                 const ethPrice = await fetchEthPrice();
 
                 // Try CoW API to get this token's price relative to ETH
@@ -1539,8 +1673,8 @@
                 }
             }
 
-            // Check by symbol pattern for ETH derivatives
-            if (info && info.symbol) {
+            // Check by symbol pattern for ETH derivatives (only on non-stablecoin-native networks)
+            if (info && info.symbol && !isNativeStablecoin(network)) {
                 for (const pattern of ETH_DERIVATIVE_PATTERNS) {
                     if (pattern.test(info.symbol)) {
                         const ethPrice = await fetchEthPrice();
@@ -1565,10 +1699,24 @@
             // Try CoW Protocol native price API FIRST (no CORS issues, fast)
             const nativePrice = await fetchNativePriceFromCow(addr, network);
             if (nativePrice && nativePrice > 0) {
-                const ethPrice = await fetchEthPrice();
-                const calculatedUsdPrice = nativePrice * ethPrice;
+                let calculatedUsdPrice;
+
+                // On networks with stablecoin as native (Gnosis=xDAI, Lens=GHO),
+                // native_price IS the USD price (no ETH conversion needed)
+                if (isNativeStablecoin(network)) {
+                    calculatedUsdPrice = nativePrice;
+                } else {
+                    // On ETH-based networks, native_price is in ETH, multiply by ETH USD price
+                    const ethPrice = await fetchEthPrice();
+                    if (!ethPrice || ethPrice <= 0) {
+                        // Can't convert to USD without ETH price - skip
+                        return 0;
+                    }
+                    calculatedUsdPrice = nativePrice * ethPrice;
+                }
+
                 // Sanity check - if price seems unreasonable, skip it
-                if (calculatedUsdPrice > 0.0000001 && calculatedUsdPrice < 1000000) {
+                if (calculatedUsdPrice && calculatedUsdPrice > 0.0000001 && calculatedUsdPrice < 1000000) {
                     tokenPriceCache.set(addr, { price: calculatedUsdPrice, timestamp: Date.now() });
                     return calculatedUsdPrice;
                 }
@@ -1909,6 +2057,13 @@
                 const sellValue = calculateUSDValue(order.sellAmount, sellToken);
                 const buyValue = calculateUSDValue(order.buyAmount, buyToken);
 
+                // Sanity check: if buy value is way higher than sell value, it's likely a spam order
+                // (someone asking for 200K WBTC for $2 USDC). Cap buy value at 10x sell value.
+                // This prevents unrealistic orders from inflating volume stats.
+                const cappedBuyValue = (sellValue > 0 && buyValue > sellValue * 10)
+                    ? sellValue  // Use sell value as the realistic volume
+                    : buyValue;
+
                 orders.set(order.uid, order);
 
                 // Update sell token
@@ -1936,7 +2091,7 @@
                     });
                 }
                 const buyTokenData = tokens.get(buyToken);
-                buyTokenData.totalBuyVolume += buyValue;
+                buyTokenData.totalBuyVolume += cappedBuyValue;  // Use capped value
                 if (!buyTokenData.orders.includes(order.uid)) {
                     buyTokenData.orders.push(order.uid);
                 }
@@ -1948,7 +2103,7 @@
                 }
                 const edge = edges.get(edgeKey);
                 edge.sellVolume += sellValue;
-                edge.buyVolume += buyValue;
+                edge.buyVolume += cappedBuyValue;  // Use capped value
                 if (!edge.orders.includes(order.uid)) {
                     edge.orders.push(order.uid);
                 }
@@ -2002,8 +2157,11 @@
             pricesFetchingInProgress = true;
 
             try {
-                // First get ETH price (needed for conversion)
-                await fetchEthPrice();
+                // Get ETH price first (needed for conversion on ETH-native networks)
+                // On stablecoin-native networks (Gnosis, Lens), native_price IS the USD price
+                if (!isNativeStablecoin(network)) {
+                    await fetchEthPrice();
+                }
 
                 // Fetch prices one at a time with delays to avoid rate limiting
                 // Prioritize CoW API native_price (no CORS issues)
@@ -2619,18 +2777,19 @@
             const categoryLabel = getCategoryLabel(category);
             const categoryClass = `category-${category}`;
 
-            const priceDisplay = tokenInfo.price > 0
-                ? (tokenInfo.price < 0.01
+            const hasPrice = tokenInfo.price && tokenInfo.price > 0;
+            const priceDisplay = hasPrice
+                ? '$' + (tokenInfo.price < 0.01
                     ? tokenInfo.price.toExponential(2)
                     : tokenInfo.price.toLocaleString(undefined, {maximumFractionDigits: 2}))
-                : 'N/A';
+                : '—';
 
             tooltip.innerHTML = `
                 <div class="tooltip-title">${tokenInfo.symbol}</div>
                 <div class="tooltip-subtitle">${address}</div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">Price:</span>
-                    <span class="tooltip-price">$${priceDisplay}</span>
+                    <span class="tooltip-price">${priceDisplay}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">Sell Volume:</span>
@@ -2732,6 +2891,19 @@
 
         // Load cache on startup
         loadOrderCache();
+
+        // Save cache immediately when page is about to close (don't rely on debounce)
+        window.addEventListener('beforeunload', () => {
+            if (orderDetailsCache.size > 0) {
+                try {
+                    const entries = Array.from(orderDetailsCache.entries());
+                    localStorage.setItem('cowOrderCache', JSON.stringify(entries));
+                    console.log(`[cache] Saved ${entries.length} orders on page unload`);
+                } catch (e) {
+                    // Ignore errors on unload
+                }
+            }
+        });
 
         // Fetch orders from the auction list
         async function fetchOrders() {
@@ -3248,11 +3420,51 @@
             // When flipped, swap asks and bids so chart maintains correct visual layout
             // (bids on left at lower prices, asks on right at higher prices)
             setTimeout(async () => {
+                // Store orders for redrawing when range changes
                 if (currentPanelFlipped) {
-                    drawDepthChart(reverseOrders, validOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
+                    depthChartAskOrders = reverseOrders;
+                    depthChartBidOrders = validOrders;
                 } else {
-                    drawDepthChart(validOrders, reverseOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
+                    depthChartAskOrders = validOrders;
+                    depthChartBidOrders = reverseOrders;
                 }
+                depthChartBaseSymbol = baseInfo.symbol;
+                depthChartQuoteSymbol = quoteInfo.symbol;
+
+                // Smart default range based on actual order book spread
+                // Calculate spread from best bid/ask to determine appropriate zoom
+                if (!depthShowAll) {
+                    const sortedAsks = [...depthChartAskOrders].sort((a, b) => a.displayPrice - b.displayPrice);
+                    const sortedBids = [...depthChartBidOrders].sort((a, b) => b.displayPrice - a.displayPrice);
+
+                    const bestAsk = sortedAsks.length > 0 ? sortedAsks[0].displayPrice : null;
+                    const bestBid = sortedBids.length > 0 ? sortedBids[0].displayPrice : null;
+
+                    let defaultRange = 75;  // Fallback
+
+                    if (bestAsk && bestBid && bestBid > 0) {
+                        const midPrice = (bestAsk + bestBid) / 2;
+                        const spread = (bestAsk - bestBid) / midPrice;  // Spread as percentage
+
+                        // Set zoom to show ~10x the spread, minimum 1%, capped at 100%
+                        // This ensures we see context around the spread
+                        defaultRange = Math.max(1, Math.min(100, spread * 100 * 10));
+
+                        // For very tight spreads (stable pairs), ensure at least 0.5%
+                        if (spread < 0.001) {
+                            defaultRange = Math.max(0.5, spread * 100 * 20);
+                        }
+                    } else if (sortedAsks.length === 0 || sortedBids.length === 0) {
+                        // Only one side has orders - show wider range
+                        defaultRange = 100;
+                    }
+
+                    depthRangePercent = defaultRange;
+                    document.getElementById('depth-range-slider').value = percentToSlider(defaultRange);
+                    document.getElementById('depth-range-value').textContent = formatRangePercent(defaultRange);
+                }
+
+                drawDepthChart(depthChartAskOrders, depthChartBidOrders, depthChartBaseSymbol, depthChartQuoteSymbol, currentPanelFlipped);
 
                 // Fetch and display reference prices from CoW API and USD prices
                 const network = document.getElementById('network').value;
@@ -3288,6 +3500,68 @@
             document.getElementById(`tab-${tabName}`).classList.add('active');
         }
 
+        // Depth chart range control functions
+        // Logarithmic slider: maps 0-100 slider value to 0.1% - 500% range
+        // This gives finer control at small percentages (useful for stable pairs)
+        const RANGE_MIN_PERCENT = 0.1;   // Minimum ±0.1%
+        const RANGE_MAX_PERCENT = 500;   // Maximum ±500% (effectively "show all")
+
+        function sliderToPercent(sliderValue) {
+            // Logarithmic mapping: slider 0-100 -> percent 0.1-500
+            // Using exponential: percent = min * (max/min)^(slider/100)
+            const ratio = RANGE_MAX_PERCENT / RANGE_MIN_PERCENT;
+            return RANGE_MIN_PERCENT * Math.pow(ratio, sliderValue / 100);
+        }
+
+        function percentToSlider(percent) {
+            // Inverse: convert percent back to slider value
+            const ratio = RANGE_MAX_PERCENT / RANGE_MIN_PERCENT;
+            return 100 * Math.log(percent / RANGE_MIN_PERCENT) / Math.log(ratio);
+        }
+
+        function formatRangePercent(percent) {
+            if (percent >= 500) return 'All';
+            if (percent >= 10) return `±${Math.round(percent)}%`;
+            if (percent >= 1) return `±${percent.toFixed(1)}%`;
+            return `±${percent.toFixed(2)}%`;
+        }
+
+        function updateDepthRange() {
+            const slider = document.getElementById('depth-range-slider');
+            const sliderValue = parseInt(slider.value);
+            depthRangePercent = sliderToPercent(sliderValue);
+            depthShowAll = depthRangePercent >= 500;
+
+            const label = document.getElementById('depth-range-value');
+            label.textContent = formatRangePercent(depthRangePercent);
+
+            // Redraw chart with new range
+            redrawDepthChart();
+        }
+
+        function resetDepthRange() {
+            depthRangePercent = 75;
+            depthShowAll = false;
+            document.getElementById('depth-range-slider').value = percentToSlider(75);
+            document.getElementById('depth-range-value').textContent = '±75%';
+            redrawDepthChart();
+        }
+
+        function showAllOrders() {
+            depthRangePercent = 500;
+            depthShowAll = true;
+            document.getElementById('depth-range-slider').value = 100;
+            document.getElementById('depth-range-value').textContent = 'All';
+            redrawDepthChart();
+        }
+
+        function redrawDepthChart() {
+            // Only redraw if we have stored chart data
+            if (depthChartBaseSymbol && depthChartQuoteSymbol) {
+                drawDepthChart(depthChartAskOrders, depthChartBidOrders, depthChartBaseSymbol, depthChartQuoteSymbol, currentPanelFlipped);
+            }
+        }
+
         function drawDepthChart(askOrders, bidOrders, baseSymbol, quoteSymbol, isFlipped = false) {
             const depthCanvas = document.getElementById('depth-chart');
             const ctx = depthCanvas.getContext('2d');
@@ -3305,9 +3579,11 @@
             const chartW = w - padding.left - padding.right;
             const chartH = h - padding.top - padding.bottom;
 
-            // Clear canvas
+            // Clear canvas and reset order points for hover
             ctx.fillStyle = '#0a0a1a';
             ctx.fillRect(0, 0, w, h);
+            depthChartOrderPoints = [];
+            depthChartPadding = padding;
 
             const hasAsks = askOrders && askOrders.length > 0;
             const hasBids = bidOrders && bidOrders.length > 0;
@@ -3322,73 +3598,124 @@
 
             // Use displayPrice for sorting and positioning
             // Sort asks by displayPrice (low to high) - these are sell orders
-            const sortedAsks = hasAsks ? [...askOrders].sort((a, b) => a.displayPrice - b.displayPrice) : [];
+            let sortedAsks = hasAsks ? [...askOrders].sort((a, b) => a.displayPrice - b.displayPrice) : [];
             // Sort bids by displayPrice (high to low) - these are buy orders (reverse direction)
-            const sortedBids = hasBids ? [...bidOrders].sort((a, b) => b.displayPrice - a.displayPrice) : [];
+            let sortedBids = hasBids ? [...bidOrders].sort((a, b) => b.displayPrice - a.displayPrice) : [];
 
-            // Calculate cumulative depth for asks (from lowest price upward)
+            // Calculate mid price BEFORE filtering (using best bid/ask)
+            const bestBidPrice = sortedBids.length > 0 ? sortedBids[0].displayPrice : null;
+            const bestAskPrice = sortedAsks.length > 0 ? sortedAsks[0].displayPrice : null;
+            let referenceMidPrice;
+            if (bestBidPrice !== null && bestAskPrice !== null) {
+                referenceMidPrice = (bestBidPrice + bestAskPrice) / 2;
+            } else if (bestBidPrice !== null) {
+                referenceMidPrice = bestBidPrice;
+            } else if (bestAskPrice !== null) {
+                referenceMidPrice = bestAskPrice;
+            } else {
+                referenceMidPrice = 1;  // Fallback
+            }
+
+            // Apply price range filter (unless showing all)
+            if (!depthShowAll && referenceMidPrice > 0) {
+                const minPriceFilter = referenceMidPrice * (1 - depthRangePercent / 100);
+                const maxPriceFilter = referenceMidPrice * (1 + depthRangePercent / 100);
+
+                sortedAsks = sortedAsks.filter(o => o.displayPrice >= minPriceFilter && o.displayPrice <= maxPriceFilter);
+                sortedBids = sortedBids.filter(o => o.displayPrice >= minPriceFilter && o.displayPrice <= maxPriceFilter);
+            }
+
+            // Calculate cumulative depth for asks and bids
+            // IMPORTANT: Always use sellAmount (what the order is actually putting up)
+            // This prevents spam orders from inflating the chart
+            // (e.g., "sell 2 DAI for 2.5M WETH" should show as 2 DAI volume, not 2.5M WETH)
+            //
+            // Each side shows volume in what they're ACTUALLY offering:
+            // - Asks (selling base): volume in base token
+            // - Bids (selling quote): volume in quote token
+            //
+            // These are different units but that's intentional - it shows real liquidity
+            // without allowing manipulation via unrealistic asks/bids
+
+            // Build cumulative depth arrays
+            // Each point stores the cumulative depth AFTER adding that order
+            // This ensures the chart starts with a vertical line showing the first order's volume
             let cumulativeAsks = [];
             let askCumSum = 0;
             for (const order of sortedAsks) {
-                cumulativeAsks.push({ price: order.displayPrice, depth: askCumSum });
+                // Asks are selling base token - volume in base (can't be manipulated)
                 askCumSum += order.sellAmount;
-            }
-            if (sortedAsks.length > 0) {
-                cumulativeAsks.push({ price: sortedAsks[sortedAsks.length - 1].displayPrice, depth: askCumSum });
+                cumulativeAsks.push({ price: order.displayPrice, depth: askCumSum, order: order });
             }
 
-            // Calculate cumulative depth for bids (from highest price downward)
+            // Bids are selling quote token - volume in quote (can't be manipulated)
             let cumulativeBids = [];
             let bidCumSum = 0;
             for (const order of sortedBids) {
-                cumulativeBids.push({ price: order.displayPrice, depth: bidCumSum });
-                bidCumSum += order.sellAmount; // sellAmount here is what they're offering
-            }
-            if (sortedBids.length > 0) {
-                cumulativeBids.push({ price: sortedBids[sortedBids.length - 1].displayPrice, depth: bidCumSum });
+                // Bids are selling quote token - volume in quote (can't be manipulated)
+                bidCumSum += order.sellAmount;
+                cumulativeBids.push({ price: order.displayPrice, depth: bidCumSum, order: order });
             }
 
-            // Find price range across both sides
-            const allPrices = [
-                ...sortedAsks.map(o => o.displayPrice),
-                ...sortedBids.map(o => o.displayPrice)
-            ];
-            const minPrice = Math.min(...allPrices);
-            const maxPrice = Math.max(...allPrices);
-            let priceRange = maxPrice - minPrice;
+            // Use the reference mid price for display and as the center of the view
+            const midPrice = referenceMidPrice;
 
-            if (priceRange < minPrice * 0.001) {
-                priceRange = minPrice * 0.01;
-            }
-
-            // Calculate proper mid price: midpoint between best bid and best ask
-            // Best bid = highest bid price (bids are sorted high to low, so first element)
-            // Best ask = lowest ask price (asks are sorted low to high, so first element)
-            const bestBid = sortedBids.length > 0 ? sortedBids[0].displayPrice : null;
-            const bestAsk = sortedAsks.length > 0 ? sortedAsks[0].displayPrice : null;
-
-            let midPrice;
-            if (bestBid !== null && bestAsk !== null) {
-                midPrice = (bestBid + bestAsk) / 2;
-            } else if (bestBid !== null) {
-                midPrice = bestBid;
-            } else if (bestAsk !== null) {
-                midPrice = bestAsk;
+            // Calculate X-axis range directly from slider percentage (smooth zooming)
+            // This ensures the axis doesn't jump around as orders get filtered
+            let extendedMin, extendedMax;
+            if (depthShowAll) {
+                // When showing all, use the actual order prices
+                const allPrices = [
+                    ...sortedAsks.map(o => o.displayPrice),
+                    ...sortedBids.map(o => o.displayPrice)
+                ];
+                if (allPrices.length === 0) {
+                    ctx.fillStyle = '#888';
+                    ctx.font = '14px Segoe UI';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('No orders to display', w / 2, h / 2);
+                    document.getElementById('depth-mid-price').textContent = formatPrice(midPrice);
+                    return;
+                }
+                const minPrice = Math.min(...allPrices);
+                const maxPrice = Math.max(...allPrices);
+                const priceRange = maxPrice - minPrice || midPrice * 0.01;
+                extendedMin = Math.max(0, minPrice - priceRange * 0.1);
+                extendedMax = maxPrice + priceRange * 0.1;
             } else {
-                midPrice = (minPrice + maxPrice) / 2;
+                // Use slider percentage to set fixed range around mid price (smooth zoom)
+                extendedMin = Math.max(0, midPrice * (1 - depthRangePercent / 100));
+                extendedMax = midPrice * (1 + depthRangePercent / 100);
             }
 
-            const extendedMin = minPrice - priceRange * 0.3;
-            const extendedMax = maxPrice + priceRange * 0.3;
+            // Handle edge case of no orders in range
+            if (sortedAsks.length === 0 && sortedBids.length === 0) {
+                ctx.fillStyle = '#888';
+                ctx.font = '14px Segoe UI';
+                ctx.textAlign = 'center';
+                ctx.fillText('No orders in selected price range', w / 2, h / 2);
+                ctx.fillText('Try expanding the range or click "Show All"', w / 2, h / 2 + 20);
+                document.getElementById('depth-mid-price').textContent = formatPrice(midPrice);
+                return;
+            }
 
-            const maxDepth = Math.max(askCumSum, bidCumSum);
+            // Use midPrice to make asks (in base) visually comparable to bids (in quote)
+            // askCumSum is in base token, convert to quote-equivalent for scaling
+            const askCumSumInQuote = askCumSum * midPrice;
+            const maxDepthInQuote = Math.max(askCumSumInQuote, bidCumSum);
+
+            // Max depth in base token (for right Y-axis)
+            const maxDepthInBase = maxDepthInQuote / midPrice;
 
             // Update mid price display
             document.getElementById('depth-mid-price').textContent = formatPrice(midPrice);
 
             // Scale functions
             const scaleX = (price) => padding.left + ((price - extendedMin) / (extendedMax - extendedMin)) * chartW;
-            const scaleY = (depth) => padding.top + chartH - (depth / maxDepth) * chartH;
+            // scaleY for bids (in quote token)
+            const scaleYBid = (depth) => padding.top + chartH - (depth / maxDepthInQuote) * chartH;
+            // scaleY for asks (in base token) - scaled by midPrice so visually comparable
+            const scaleYAsk = (depth) => padding.top + chartH - ((depth * midPrice) / maxDepthInQuote) * chartH;
 
             // Draw grid lines
             ctx.strokeStyle = '#1a1a2e';
@@ -3401,11 +3728,18 @@
                 ctx.lineTo(w - padding.right, y);
                 ctx.stroke();
 
-                const depthVal = maxDepth * (1 - i / 5);
-                ctx.fillStyle = '#888';
+                // Left Y-axis: quote token (for bids)
+                const depthValQuote = maxDepthInQuote * (1 - i / 5);
+                ctx.fillStyle = '#22c55e';  // Green for bids/quote
                 ctx.font = '10px Segoe UI';
                 ctx.textAlign = 'right';
-                ctx.fillText(formatAmount(depthVal), padding.left - 8, y + 3);
+                ctx.fillText(formatAmount(depthValQuote), padding.left - 8, y + 3);
+
+                // Right Y-axis: base token (for asks)
+                const depthValBase = maxDepthInBase * (1 - i / 5);
+                ctx.fillStyle = '#ef4444';  // Red for asks/base
+                ctx.textAlign = 'left';
+                ctx.fillText(formatAmount(depthValBase), w - padding.right + 8, y + 3);
             }
 
             for (let i = 0; i <= 6; i++) {
@@ -3434,20 +3768,27 @@
             ctx.setLineDash([]);
 
             // Draw bids (green, left side) - cumulative from high price to low
-            if (cumulativeBids.length > 1) {
+            // Step pattern: vertical up at price, then horizontal to next price
+            if (cumulativeBids.length >= 1) {
                 ctx.beginPath();
-                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleY(0));
+                // Start at best bid price, at zero depth
+                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleYBid(0));
+                // First vertical line up to first order's depth
+                ctx.lineTo(scaleX(cumulativeBids[0].price), scaleYBid(cumulativeBids[0].depth));
 
                 for (let i = 0; i < cumulativeBids.length - 1; i++) {
                     const curr = cumulativeBids[i];
                     const next = cumulativeBids[i + 1];
-                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
-                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                    // Horizontal to next price at current depth
+                    ctx.lineTo(scaleX(next.price), scaleYBid(curr.depth));
+                    // Vertical to next depth
+                    ctx.lineTo(scaleX(next.price), scaleYBid(next.depth));
                 }
                 const lastBid = cumulativeBids[cumulativeBids.length - 1];
-                ctx.lineTo(scaleX(lastBid.price), scaleY(lastBid.depth));
-                ctx.lineTo(scaleX(extendedMin), scaleY(lastBid.depth));
-                ctx.lineTo(scaleX(extendedMin), scaleY(0));
+                // Extend horizontally to edge
+                ctx.lineTo(scaleX(extendedMin), scaleYBid(lastBid.depth));
+                // Close the shape
+                ctx.lineTo(scaleX(extendedMin), scaleYBid(0));
                 ctx.closePath();
 
                 const bidGradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
@@ -3456,44 +3797,57 @@
                 ctx.fillStyle = bidGradient;
                 ctx.fill();
 
-                // Draw bid line
+                // Draw bid line (same path without closing)
                 ctx.beginPath();
-                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleY(0));
+                ctx.moveTo(scaleX(cumulativeBids[0].price), scaleYBid(0));
+                ctx.lineTo(scaleX(cumulativeBids[0].price), scaleYBid(cumulativeBids[0].depth));
                 for (let i = 0; i < cumulativeBids.length - 1; i++) {
                     const curr = cumulativeBids[i];
                     const next = cumulativeBids[i + 1];
-                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
-                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleYBid(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleYBid(next.depth));
                 }
-                ctx.lineTo(scaleX(cumulativeBids[cumulativeBids.length - 1].price), scaleY(cumulativeBids[cumulativeBids.length - 1].depth));
+                ctx.lineTo(scaleX(extendedMin), scaleYBid(lastBid.depth));
                 ctx.strokeStyle = '#22c55e';
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                // Dots for bids
+                // Dots for bids - also store positions for hover
                 ctx.fillStyle = '#22c55e';
                 for (const point of cumulativeBids) {
+                    const x = scaleX(point.price);
+                    const y = scaleYBid(point.depth);
                     ctx.beginPath();
-                    ctx.arc(scaleX(point.price), scaleY(point.depth), 4, 0, Math.PI * 2);
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
                     ctx.fill();
+                    if (point.order) {
+                        depthChartOrderPoints.push({ x, y, order: point.order, isBid: true });
+                    }
                 }
             }
 
             // Draw asks (red, right side) - cumulative from low price to high
-            if (cumulativeAsks.length > 1) {
+            // Step pattern: vertical up at price, then horizontal to next price
+            if (cumulativeAsks.length >= 1) {
                 ctx.beginPath();
-                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleY(0));
+                // Start at best ask price, at zero depth
+                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleYAsk(0));
+                // First vertical line up to first order's depth
+                ctx.lineTo(scaleX(cumulativeAsks[0].price), scaleYAsk(cumulativeAsks[0].depth));
 
                 for (let i = 0; i < cumulativeAsks.length - 1; i++) {
                     const curr = cumulativeAsks[i];
                     const next = cumulativeAsks[i + 1];
-                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
-                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                    // Horizontal to next price at current depth
+                    ctx.lineTo(scaleX(next.price), scaleYAsk(curr.depth));
+                    // Vertical to next depth
+                    ctx.lineTo(scaleX(next.price), scaleYAsk(next.depth));
                 }
                 const lastAsk = cumulativeAsks[cumulativeAsks.length - 1];
-                ctx.lineTo(scaleX(lastAsk.price), scaleY(lastAsk.depth));
-                ctx.lineTo(scaleX(extendedMax), scaleY(lastAsk.depth));
-                ctx.lineTo(scaleX(extendedMax), scaleY(0));
+                // Extend horizontally to edge
+                ctx.lineTo(scaleX(extendedMax), scaleYAsk(lastAsk.depth));
+                // Close the shape
+                ctx.lineTo(scaleX(extendedMax), scaleYAsk(0));
                 ctx.closePath();
 
                 const askGradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
@@ -3502,26 +3856,32 @@
                 ctx.fillStyle = askGradient;
                 ctx.fill();
 
-                // Draw ask line
+                // Draw ask line (same path without closing)
                 ctx.beginPath();
-                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleY(0));
+                ctx.moveTo(scaleX(cumulativeAsks[0].price), scaleYAsk(0));
+                ctx.lineTo(scaleX(cumulativeAsks[0].price), scaleYAsk(cumulativeAsks[0].depth));
                 for (let i = 0; i < cumulativeAsks.length - 1; i++) {
                     const curr = cumulativeAsks[i];
                     const next = cumulativeAsks[i + 1];
-                    ctx.lineTo(scaleX(curr.price), scaleY(curr.depth));
-                    ctx.lineTo(scaleX(next.price), scaleY(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleYAsk(curr.depth));
+                    ctx.lineTo(scaleX(next.price), scaleYAsk(next.depth));
                 }
-                ctx.lineTo(scaleX(cumulativeAsks[cumulativeAsks.length - 1].price), scaleY(cumulativeAsks[cumulativeAsks.length - 1].depth));
+                ctx.lineTo(scaleX(extendedMax), scaleYAsk(lastAsk.depth));
                 ctx.strokeStyle = '#ef4444';
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                // Dots for asks
+                // Dots for asks - also store positions for hover
                 ctx.fillStyle = '#ef4444';
                 for (const point of cumulativeAsks) {
+                    const x = scaleX(point.price);
+                    const y = scaleYAsk(point.depth);
                     ctx.beginPath();
-                    ctx.arc(scaleX(point.price), scaleY(point.depth), 4, 0, Math.PI * 2);
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
                     ctx.fill();
+                    if (point.order) {
+                        depthChartOrderPoints.push({ x, y, order: point.order, isBid: false });
+                    }
                 }
             }
 
@@ -3531,26 +3891,157 @@
             ctx.textAlign = 'center';
             ctx.fillText(`Price (${quoteSymbol} per ${baseSymbol})`, w / 2, h - 8);
 
+            // Left Y-axis label (quote token - for bids)
             ctx.save();
-            ctx.translate(15, h / 2);
+            ctx.translate(12, h / 2);
             ctx.rotate(-Math.PI / 2);
-            ctx.fillText(`Cumulative Volume`, 0, 0);
+            ctx.fillStyle = '#22c55e';
+            ctx.fillText(`${quoteSymbol}`, 0, 0);
             ctx.restore();
 
-            // Draw legend in top corners
+            // Right Y-axis label (base token - for asks)
+            ctx.save();
+            ctx.translate(w - 12, h / 2);
+            ctx.rotate(Math.PI / 2);
+            ctx.fillStyle = '#ef4444';
+            ctx.fillText(`${baseSymbol}`, 0, 0);
+            ctx.restore();
+
+            // Draw legend in top corners with units
+            // Bids are selling quote token, Asks are selling base token
             if (hasBids) {
                 ctx.fillStyle = '#22c55e';
                 ctx.font = 'bold 11px Segoe UI';
                 ctx.textAlign = 'left';
-                ctx.fillText(`Bids (${sortedBids.length})`, padding.left, padding.top - 15);
+                ctx.fillText(`Bids: ${formatAmount(bidCumSum)} ${quoteSymbol}`, padding.left, padding.top - 15);
             }
             if (hasAsks) {
                 ctx.fillStyle = '#ef4444';
                 ctx.font = 'bold 11px Segoe UI';
                 ctx.textAlign = 'right';
-                ctx.fillText(`Asks (${sortedAsks.length})`, w - padding.right, padding.top - 15);
+                ctx.fillText(`Asks: ${formatAmount(askCumSum)} ${baseSymbol}`, w - padding.right, padding.top - 15);
             }
         }
+
+        // Depth chart mouse interaction
+        function setupDepthChartHover() {
+            const canvas = document.getElementById('depth-chart');
+            const tooltip = document.getElementById('depth-chart-tooltip');
+            const container = document.getElementById('depth-chart-container');
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Find closest order point within 15px radius
+                let closestPoint = null;
+                let closestDist = 15;
+
+                for (const point of depthChartOrderPoints) {
+                    const dist = Math.sqrt((point.x - x) ** 2 + (point.y - y) ** 2);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestPoint = point;
+                    }
+                }
+
+                if (closestPoint && closestPoint.order) {
+                    const order = closestPoint.order;
+                    const network = document.getElementById('network').value;
+                    const explorerBase = getExplorerUrl(network);
+                    const orderUrl = `${explorerBase}/orders/${order.uid}`;
+
+                    const typeLabel = closestPoint.isBid ? 'Bid' : 'Ask';
+                    const typeColor = closestPoint.isBid ? '#22c55e' : '#ef4444';
+
+                    tooltip.innerHTML = `
+                        <div class="depth-tooltip-title" style="color: ${typeColor}">${typeLabel} Order</div>
+                        <div class="depth-tooltip-row">
+                            <span class="depth-tooltip-label">Sell:</span>
+                            <span>${formatAmount(order.sellAmount)} ${order.sellSymbol}</span>
+                        </div>
+                        <div class="depth-tooltip-row">
+                            <span class="depth-tooltip-label">Buy:</span>
+                            <span>${formatAmount(order.buyAmount)} ${order.buySymbol}</span>
+                        </div>
+                        <div class="depth-tooltip-row">
+                            <span class="depth-tooltip-label">Price:</span>
+                            <span>${formatPrice(order.displayPrice)} ${depthChartQuoteSymbol}/${depthChartBaseSymbol}</span>
+                        </div>
+                        <a href="${orderUrl}" target="_blank" class="depth-tooltip-link" onclick="event.stopPropagation()">
+                            View on Explorer ↗
+                        </a>
+                    `;
+
+                    // Position tooltip near cursor but within container
+                    const containerRect = container.getBoundingClientRect();
+                    let tooltipX = e.clientX - containerRect.left + 15;
+                    let tooltipY = e.clientY - containerRect.top + 15;
+
+                    // Keep tooltip within container bounds
+                    tooltip.style.left = tooltipX + 'px';
+                    tooltip.style.top = tooltipY + 'px';
+                    tooltip.classList.add('visible');
+
+                    // Adjust if tooltip goes off screen
+                    const tooltipRect = tooltip.getBoundingClientRect();
+                    if (tooltipRect.right > containerRect.right) {
+                        tooltipX = e.clientX - containerRect.left - tooltipRect.width - 15;
+                        tooltip.style.left = tooltipX + 'px';
+                    }
+                    if (tooltipRect.bottom > containerRect.bottom) {
+                        tooltipY = e.clientY - containerRect.top - tooltipRect.height - 15;
+                        tooltip.style.top = tooltipY + 'px';
+                    }
+                } else {
+                    tooltip.classList.remove('visible');
+                }
+            });
+
+            canvas.addEventListener('mouseleave', (e) => {
+                // Don't hide if we're moving to the tooltip
+                const relatedTarget = e.relatedTarget;
+                if (relatedTarget && (relatedTarget === tooltip || tooltip.contains(relatedTarget))) {
+                    return;
+                }
+                tooltip.classList.remove('visible');
+            });
+
+            // Hide tooltip when mouse leaves the tooltip itself
+            tooltip.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('visible');
+            });
+
+            // Click on canvas to open order in explorer
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Find closest order point within 15px radius
+                let closestPoint = null;
+                let closestDist = 15;
+
+                for (const point of depthChartOrderPoints) {
+                    const dist = Math.sqrt((point.x - x) ** 2 + (point.y - y) ** 2);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestPoint = point;
+                    }
+                }
+
+                if (closestPoint && closestPoint.order) {
+                    const network = document.getElementById('network').value;
+                    const explorerBase = getExplorerUrl(network);
+                    const orderUrl = `${explorerBase}/orders/${closestPoint.order.uid}`;
+                    window.open(orderUrl, '_blank');
+                }
+            });
+        }
+
+        // Initialize depth chart hover when DOM is ready
+        document.addEventListener('DOMContentLoaded', setupDepthChartHover);
 
         function closeOrderPanel() {
             document.getElementById('order-panel').classList.remove('visible');
