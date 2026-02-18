@@ -1340,13 +1340,26 @@
                     fetchNativePriceFromCow(quoteToken, network)
                 ]);
 
-                // native_price = how much native token (ETH) for 1 token
-                // So: baseNative = ETH per 1 baseToken
-                //     quoteNative = ETH per 1 quoteToken
-                // Price = baseNative / quoteNative = quoteTokens per 1 baseToken
-                if (baseNative && quoteNative && quoteNative > 0) {
-                    return baseNative / quoteNative;
-                }
+                if (!baseNative || !quoteNative || quoteNative === 0) return null;
+
+                // native_price returns: wei per 1 smallest unit of the token
+                // To get the price ratio, we need to account for decimals
+                //
+                // native_price * 10^(token_decimals - 18) = ETH per 1 full token
+                //
+                // For the ratio: (baseNative * 10^(baseDecimals-18)) / (quoteNative * 10^(quoteDecimals-18))
+                //              = (baseNative / quoteNative) * 10^(baseDecimals - quoteDecimals)
+
+                const baseInfo = tokenInfoCache.get(baseToken.toLowerCase()) || KNOWN_TOKENS[baseToken.toLowerCase()] || { decimals: 18 };
+                const quoteInfo = tokenInfoCache.get(quoteToken.toLowerCase()) || KNOWN_TOKENS[quoteToken.toLowerCase()] || { decimals: 18 };
+
+                const baseDecimals = baseInfo.decimals || 18;
+                const quoteDecimals = quoteInfo.decimals || 18;
+
+                const decimalAdjustment = Math.pow(10, baseDecimals - quoteDecimals);
+                const priceRatio = (baseNative / quoteNative) * decimalAdjustment;
+
+                return priceRatio;
             } catch (e) {
                 console.error('Error fetching CoW price ratio:', e);
             }
