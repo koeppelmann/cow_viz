@@ -2522,12 +2522,16 @@
         }
 
         // Track known orders to accumulate over time (like 3D view)
-        let knownOrderUids = new Set();
+        let knownOrderUids = new Set();  // Orders currently displayed
         let pendingOrderUids = []; // Orders waiting to be fetched
         let isFetching = false;
         let currentFetchDelay = 500; // Start with 500ms between individual requests
         const MIN_FETCH_DELAY = 300;  // Minimum 300ms between requests
         const MAX_FETCH_DELAY = 5000; // Max 5 seconds when rate limited
+
+        // Persistent cache for order details - survives even when orders leave auction
+        // This prevents re-fetching orders we've already looked up
+        const orderDetailsCache = new Map();
 
         // Fetch orders from the auction list
         async function fetchOrders() {
@@ -2543,15 +2547,36 @@
 
                 document.getElementById('auction-id').textContent = auctionData.auctionId?.toLocaleString() || '-';
 
-                // Find new orders (not already known and not pending)
+                // Find orders not currently displayed
                 const newOrderUids = orderUids.filter(uid =>
                     !knownOrderUids.has(uid) && !pendingOrderUids.includes(uid)
                 );
 
-                console.log(`[fetchOrders] Auction has ${orderUids.length} orders, ${newOrderUids.length} new, ${knownOrderUids.size} known, ${pendingOrderUids.length} pending`);
+                // Separate into cached (no API call needed) and uncached (need to fetch)
+                const cachedOrders = [];
+                const uncachedUids = [];
+                for (const uid of newOrderUids) {
+                    const cached = orderDetailsCache.get(uid);
+                    if (cached) {
+                        cachedOrders.push(cached);
+                    } else {
+                        uncachedUids.push(uid);
+                    }
+                }
 
-                // Add new orders to pending queue
-                pendingOrderUids.push(...newOrderUids);
+                console.log(`[fetchOrders] Auction has ${orderUids.length} orders, ${newOrderUids.length} new (${cachedOrders.length} cached, ${uncachedUids.length} to fetch), ${knownOrderUids.size} known`);
+
+                // Immediately process cached orders (no API call needed!)
+                if (cachedOrders.length > 0) {
+                    for (const order of cachedOrders) {
+                        knownOrderUids.add(order.uid);
+                    }
+                    await processNewOrders(cachedOrders);
+                    console.log(`[fetchOrders] Restored ${cachedOrders.length} orders from cache`);
+                }
+
+                // Add uncached orders to pending queue for fetching
+                pendingOrderUids.push(...uncachedUids);
 
                 // Check for filled/expired orders (no longer in auction)
                 const removedUids = [...knownOrderUids].filter(uid => !orderUids.includes(uid));
@@ -2603,6 +2628,8 @@
                     if (orderRes.ok) {
                         const order = await orderRes.json();
                         if (order && order.status === 'open') {
+                            // Cache the order details for future use
+                            orderDetailsCache.set(order.uid, order);
                             knownOrderUids.add(order.uid);
                             await processNewOrders([order]);
                             fetchedCount++;
@@ -3342,9 +3369,10 @@
             knownOrderUids.clear();
             pendingOrderUids = [];
             isFetching = false;
-            currentBatchDelay = MIN_BATCH_DELAY;
+            currentFetchDelay = MIN_FETCH_DELAY;
             tokenPositions.clear();
             tokenPriceCache.clear();
+            // Note: orderDetailsCache is NOT cleared - UIDs are globally unique
             fetchOrders();
         });
 
