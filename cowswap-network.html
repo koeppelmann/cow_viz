@@ -2926,11 +2926,12 @@
                 const order = orders.get(uid);
                 if (!order) return null;
 
-                const sellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18 };
-                const buyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18 };
+                // Get token info for THIS order's actual tokens
+                const orderSellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18 };
+                const orderBuyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18 };
 
-                const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
-                const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
+                const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, orderSellTokenInfo.decimals);
+                const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, orderBuyTokenInfo.decimals);
 
                 // Raw price = buyAmount / sellAmount (how much buy token per sell token)
                 const rawPrice = buyAmount / sellAmount;
@@ -2946,14 +2947,18 @@
                     displayPrice = rawPrice;
                 }
 
+                // Get actual symbols from the order's tokens
+                const actualSellInfo = await getTokenInfo(order.sellToken);
+                const actualBuyInfo = await getTokenInfo(order.buyToken);
+
                 return {
                     uid,
                     sellAmount,
                     buyAmount,
                     rawPrice,
                     displayPrice,
-                    sellSymbol: sellInfo.symbol,
-                    buySymbol: buyInfo.symbol,
+                    sellSymbol: actualSellInfo.symbol,  // The token this order is selling
+                    buySymbol: actualBuyInfo.symbol,    // The token this order is buying
                     explorerUrl: `${explorerBase}/orders/${uid}`
                 };
             }));
@@ -2962,17 +2967,19 @@
             const validOrders = orderDetails.filter(o => o !== null);
 
             // Process reverse edge orders if they exist
+            // These are orders going the opposite direction (e.g., if edge is USDT→WETH, reverse orders are WETH→USDT)
             let reverseOrders = [];
             if (hasReverseEdge) {
                 const reverseOrderDetails = await Promise.all(reverseEdge.orders.map(async (uid) => {
                     const order = orders.get(uid);
                     if (!order) return null;
 
-                    const sellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18 };
-                    const buyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18 };
+                    // Get token info for THIS order's actual tokens
+                    const orderSellTokenInfo = tokenInfoCache.get(order.sellToken.toLowerCase()) || KNOWN_TOKENS[order.sellToken.toLowerCase()] || { decimals: 18, symbol: '???' };
+                    const orderBuyTokenInfo = tokenInfoCache.get(order.buyToken.toLowerCase()) || KNOWN_TOKENS[order.buyToken.toLowerCase()] || { decimals: 18, symbol: '???' };
 
-                    const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, sellTokenInfo.decimals);
-                    const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, buyTokenInfo.decimals);
+                    const sellAmount = parseFloat(order.sellAmount) / Math.pow(10, orderSellTokenInfo.decimals);
+                    const buyAmount = parseFloat(order.buyAmount) / Math.pow(10, orderBuyTokenInfo.decimals);
 
                     // For reverse orders in original terms: price = sellAmount/buyAmount
                     const rawPrice = sellAmount / buyAmount;
@@ -2985,14 +2992,18 @@
                         displayPrice = rawPrice;
                     }
 
+                    // Get actual symbols from the order's tokens (not the edge)
+                    const actualSellInfo = await getTokenInfo(order.sellToken);
+                    const actualBuyInfo = await getTokenInfo(order.buyToken);
+
                     return {
                         uid,
                         sellAmount,
                         buyAmount,
                         rawPrice,
                         displayPrice,
-                        sellSymbol: buyInfo.symbol,
-                        buySymbol: sellInfo.symbol,
+                        sellSymbol: actualSellInfo.symbol,  // The token this order is selling
+                        buySymbol: actualBuyInfo.symbol,    // The token this order is buying
                         explorerUrl: `${explorerBase}/orders/${uid}`,
                         isBid: true
                     };
@@ -3009,11 +3020,12 @@
             allOrders.sort((a, b) => b.displayPrice - a.displayPrice);
 
             // Build the order list HTML
+            // Each order shows its actual sell/buy - no swapping needed
             listEl.innerHTML = allOrders.map(order => `
                 <div class="order-item" style="border-left: 3px solid ${order.isBid ? '#22c55e' : '#ef4444'};">
                     <div class="order-amounts">
-                        <span class="order-sell">Sell: ${formatAmount(order.isBid ? order.buyAmount : order.sellAmount)} ${order.isBid ? order.buySymbol : order.sellSymbol}</span>
-                        <span class="order-buy">Buy: ${formatAmount(order.isBid ? order.sellAmount : order.buyAmount)} ${order.isBid ? order.sellSymbol : order.buySymbol}</span>
+                        <span class="order-sell">Sell: ${formatAmount(order.sellAmount)} ${order.sellSymbol}</span>
+                        <span class="order-buy">Buy: ${formatAmount(order.buyAmount)} ${order.buySymbol}</span>
                     </div>
                     <div class="order-price">
                         ${formatPrice(order.displayPrice)}<br>
