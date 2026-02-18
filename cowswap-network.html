@@ -611,6 +611,7 @@
                 <div class="depth-chart-info">
                     <div class="depth-mid-price" id="depth-mid-price">-</div>
                     <div class="depth-mid-label">Mid Market Price</div>
+                    <div class="depth-reference-prices" id="depth-reference-prices" style="font-size: 0.7rem; color: #888; margin-top: 8px;"></div>
                 </div>
             </div>
             <div class="depth-legend">
@@ -1326,6 +1327,44 @@
                 }
             } catch (e) {
                 // Silent fail
+            }
+            return null;
+        }
+
+        // Calculate price ratio between two tokens using CoW API native prices
+        // Returns: how many quoteTokens per 1 baseToken
+        async function getCowPriceRatio(baseToken, quoteToken, network) {
+            try {
+                const [baseNative, quoteNative] = await Promise.all([
+                    fetchNativePriceFromCow(baseToken, network),
+                    fetchNativePriceFromCow(quoteToken, network)
+                ]);
+
+                // native_price = how much native token (ETH) for 1 token
+                // So: baseNative = ETH per 1 baseToken
+                //     quoteNative = ETH per 1 quoteToken
+                // Price = baseNative / quoteNative = quoteTokens per 1 baseToken
+                if (baseNative && quoteNative && quoteNative > 0) {
+                    return baseNative / quoteNative;
+                }
+            } catch (e) {
+                console.error('Error fetching CoW price ratio:', e);
+            }
+            return null;
+        }
+
+        // Get price from token USD prices (CoinGecko/cached)
+        async function getUsdPriceRatio(baseToken, quoteToken, network) {
+            try {
+                const basePrice = await fetchTokenPrice(baseToken, network);
+                const quotePrice = await fetchTokenPrice(quoteToken, network);
+
+                // price ratio = baseUSD / quoteUSD = quoteTokens per 1 baseToken
+                if (basePrice && quotePrice && quotePrice > 0) {
+                    return basePrice / quotePrice;
+                }
+            } catch (e) {
+                console.error('Error fetching USD price ratio:', e);
             }
             return null;
         }
@@ -3091,12 +3130,30 @@
             // Draw depth chart after panel is visible (need timeout for CSS to apply)
             // When flipped, swap asks and bids so chart maintains correct visual layout
             // (bids on left at lower prices, asks on right at higher prices)
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (currentPanelFlipped) {
                     drawDepthChart(reverseOrders, validOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
                 } else {
                     drawDepthChart(validOrders, reverseOrders, baseInfo.symbol, quoteInfo.symbol, currentPanelFlipped);
                 }
+
+                // Fetch and display reference prices from CoW API and USD prices
+                const network = document.getElementById('network').value;
+                const refPricesEl = document.getElementById('depth-reference-prices');
+
+                const [cowPrice, usdPrice] = await Promise.all([
+                    getCowPriceRatio(currentPanelBaseToken, currentPanelQuoteToken, network),
+                    getUsdPriceRatio(currentPanelBaseToken, currentPanelQuoteToken, network)
+                ]);
+
+                let refHtml = '';
+                if (cowPrice) {
+                    refHtml += `<div>CoW API: ${formatPrice(cowPrice)} ${quoteInfo.symbol}/${baseInfo.symbol}</div>`;
+                }
+                if (usdPrice) {
+                    refHtml += `<div>USD prices: ${formatPrice(usdPrice)} ${quoteInfo.symbol}/${baseInfo.symbol}</div>`;
+                }
+                refPricesEl.innerHTML = refHtml || '<div>Reference prices unavailable</div>';
             }, 50);
         }
 
@@ -3187,7 +3244,23 @@
                 priceRange = minPrice * 0.01;
             }
 
-            const midPrice = (minPrice + maxPrice) / 2;
+            // Calculate proper mid price: midpoint between best bid and best ask
+            // Best bid = highest bid price (bids are sorted high to low, so first element)
+            // Best ask = lowest ask price (asks are sorted low to high, so first element)
+            const bestBid = sortedBids.length > 0 ? sortedBids[0].displayPrice : null;
+            const bestAsk = sortedAsks.length > 0 ? sortedAsks[0].displayPrice : null;
+
+            let midPrice;
+            if (bestBid !== null && bestAsk !== null) {
+                midPrice = (bestBid + bestAsk) / 2;
+            } else if (bestBid !== null) {
+                midPrice = bestBid;
+            } else if (bestAsk !== null) {
+                midPrice = bestAsk;
+            } else {
+                midPrice = (minPrice + maxPrice) / 2;
+            }
+
             const extendedMin = minPrice - priceRange * 0.3;
             const extendedMax = maxPrice + priceRange * 0.3;
 
