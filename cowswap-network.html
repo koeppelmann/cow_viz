@@ -145,6 +145,8 @@
             border-radius: 8px;
             padding: 15px;
             z-index: 100;
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
         }
         .legend-title {
             font-size: 0.8rem;
@@ -669,6 +671,16 @@
                 Showing <span id="filtered-tokens">0</span> of <span id="total-tokens">0</span> tokens
             </div>
         </div>
+        <div class="filter-section">
+            <div class="filter-label">
+                <span>Min Orders per Edge</span>
+                <span class="filter-value" id="edge-filter-value">1</span>
+            </div>
+            <input type="range" class="filter-slider" id="min-orders-per-edge-filter" min="1" max="50" value="1" oninput="updateMinOrdersPerEdgeFilter(this.value)">
+            <div class="filter-stats">
+                Showing <span id="filtered-edges">0</span> of <span id="total-edges">0</span> edges
+            </div>
+        </div>
     </div>
 
     <div id="info-panel">
@@ -986,28 +998,38 @@
             }
         }
 
-        // Save token info cache to localStorage (debounced)
-        let tokenInfoSaveTimeout = null;
-        function saveTokenInfoCache() {
-            if (tokenInfoSaveTimeout) clearTimeout(tokenInfoSaveTimeout);
-            tokenInfoSaveTimeout = setTimeout(() => {
-                try {
-                    // Only save entries that have real symbols (not placeholders)
-                    const entries = Array.from(tokenInfoCache.entries())
-                        .filter(([addr, info]) => info.symbol && !info.symbol.endsWith('...'));
-                    localStorage.setItem('cowTokenInfoCache', JSON.stringify(entries));
-                    console.log(`[cache] Saved ${entries.length} token infos to localStorage`);
-                } catch (e) {
-                    console.error('[cache] Failed to save token info cache:', e);
-                    if (e.name === 'QuotaExceededError') {
-                        localStorage.removeItem('cowTokenInfoCache');
-                    }
+        // Save token info cache to localStorage
+        let tokenInfoCacheDirty = false;
+
+        function saveTokenInfoCacheNow() {
+            if (!tokenInfoCacheDirty) return;
+            try {
+                const entries = Array.from(tokenInfoCache.entries())
+                    .filter(([addr, info]) => info.symbol && !info.symbol.endsWith('...'));
+                localStorage.setItem('cowTokenInfoCache', JSON.stringify(entries));
+                tokenInfoCacheDirty = false;
+                console.log(`[cache] Saved ${entries.length} token infos to localStorage`);
+            } catch (e) {
+                console.error('[cache] Failed to save token info cache:', e);
+                if (e.name === 'QuotaExceededError') {
+                    localStorage.removeItem('cowTokenInfoCache');
                 }
-            }, 2000);
+            }
+        }
+
+        function saveTokenInfoCache() {
+            tokenInfoCacheDirty = true;
         }
 
         // Load token info cache on startup
         loadTokenInfoCache();
+
+        // Periodically flush dirty token info cache every 5 seconds
+        setInterval(saveTokenInfoCacheNow, 5000);
+
+        // Save on page unload
+        window.addEventListener('beforeunload', saveTokenInfoCacheNow);
+        window.addEventListener('pagehide', saveTokenInfoCacheNow);
 
         // Canvas setup
         const canvas = document.getElementById('canvas');
@@ -1026,8 +1048,15 @@
         let draggedToken = null;
         let draggedPole = null;  // Track which pole is being dragged
         let isDragging = false;
+        let isPanning = false;   // Track canvas panning (drag empty space)
+        let panStartX = 0, panStartY = 0;
+        let didDragOrPan = false; // True if mouse moved during drag (suppress click)
         let physicsEnabled = true;
         let animationFrameId = null;
+
+        // Camera transform (zoom & pan)
+        let camX = 0, camY = 0;  // Pan offset in screen pixels
+        let camScale = 1;        // Zoom level
 
         // Layout mode: 'poles' (3 category clusters) or 'circle' (single circle)
         let layoutMode = 'poles';
@@ -1061,6 +1090,21 @@
             minDistance: 50,           // Minimum distance between tokens
             maxVelocity: 10            // Maximum velocity
         };
+
+        // Convert screen (mouse) coordinates to world coordinates
+        function screenToWorld(sx, sy) {
+            return {
+                x: (sx - camX) / camScale,
+                y: (sy - camY) / camScale
+            };
+        }
+        // Convert world coordinates to screen coordinates
+        function worldToScreen(wx, wy) {
+            return {
+                x: wx * camScale + camX,
+                y: wy * camScale + camY
+            };
+        }
 
         function resizeCanvas() {
             const oldCenterX = centerX;
@@ -1474,6 +1518,15 @@
             return null;
         }
 
+        // Convert CoW API native_price to USD price per whole token.
+        // native_price = wei-of-native per atom-of-token
+        // For 18-decimal tokens: native_price directly gives native-per-token
+        // For non-18-decimal tokens: must scale by 10^(decimals - 18)
+        function nativePriceToUsd(nativePrice, ethPriceUsd, tokenDecimals) {
+            const decimalAdjustment = Math.pow(10, tokenDecimals - 18);
+            return nativePrice * decimalAdjustment * ethPriceUsd;
+        }
+
         // Fetch native price from CoW Protocol API
         async function fetchNativePriceFromCow(address, network) {
             const apiNetwork = getApiNetwork(network);
@@ -1648,6 +1701,16 @@
                 return 0;
             }
 
+            // Get token decimals (needed for native_price conversion)
+            // If we only have placeholder info, fetch real decimals first
+            let tokenDecimals = info?.decimals ?? 18;
+            if (!info || (info.symbol && info.symbol.endsWith('...'))) {
+                const realInfo = await fetchTokenInfo(addr, network);
+                if (realInfo && realInfo.decimals !== undefined) {
+                    tokenDecimals = realInfo.decimals;
+                }
+            }
+
             // ETH derivatives - try to get actual price from CoW API
             // (only relevant on ETH-native networks, not on stablecoin-native like Gnosis)
             if (ETH_DERIVATIVES.has(addr) && !isNativeStablecoin(network)) {
@@ -1656,11 +1719,9 @@
                 // Try CoW API to get this token's price relative to ETH
                 const nativePrice = await fetchNativePriceFromCow(addr, network);
                 if (nativePrice && nativePrice > 0 && ethPrice > 0) {
-                    // nativePrice is how much ETH per 1 token
-                    // e.g., for wstETH: nativePrice might be 1.15 (1 wstETH = 1.15 ETH)
-                    const tokenUsdPrice = nativePrice * ethPrice;
+                    const tokenUsdPrice = nativePriceToUsd(nativePrice, ethPrice, tokenDecimals);
                     if (tokenUsdPrice > 100 && tokenUsdPrice < 100000) { // Sanity check
-                        console.log(`${info?.symbol || addr.slice(0,8)}: ${nativePrice.toFixed(4)} ETH = $${tokenUsdPrice.toFixed(2)}`);
+                        console.log(`${info?.symbol || addr.slice(0,8)}: nativePrice=${nativePrice} (${tokenDecimals}dec) = $${tokenUsdPrice.toFixed(2)}`);
                         tokenPriceCache.set(addr, { price: tokenUsdPrice, timestamp: Date.now() });
                         return tokenUsdPrice;
                     }
@@ -1681,7 +1742,7 @@
                         // Try to get actual price ratio from CoW API
                         const nativePrice = await fetchNativePriceFromCow(addr, network);
                         if (nativePrice && nativePrice > 0 && ethPrice > 0) {
-                            const tokenUsdPrice = nativePrice * ethPrice;
+                            const tokenUsdPrice = nativePriceToUsd(nativePrice, ethPrice, tokenDecimals);
                             if (tokenUsdPrice > 100 && tokenUsdPrice < 100000) {
                                 tokenPriceCache.set(addr, { price: tokenUsdPrice, timestamp: Date.now() });
                                 return tokenUsdPrice;
@@ -1697,22 +1758,24 @@
             }
 
             // Try CoW Protocol native price API FIRST (no CORS issues, fast)
+            // native_price = wei-of-native per atom-of-token, must adjust for decimals
             const nativePrice = await fetchNativePriceFromCow(addr, network);
             if (nativePrice && nativePrice > 0) {
                 let calculatedUsdPrice;
 
                 // On networks with stablecoin as native (Gnosis=xDAI, Lens=GHO),
-                // native_price IS the USD price (no ETH conversion needed)
+                // native_price is in native stablecoin atoms per token atom
+                // Native stablecoin has 18 decimals and $1 value
                 if (isNativeStablecoin(network)) {
-                    calculatedUsdPrice = nativePrice;
+                    calculatedUsdPrice = nativePriceToUsd(nativePrice, 1, tokenDecimals);
                 } else {
-                    // On ETH-based networks, native_price is in ETH, multiply by ETH USD price
+                    // On ETH-based networks, convert via ETH price
                     const ethPrice = await fetchEthPrice();
                     if (!ethPrice || ethPrice <= 0) {
                         // Can't convert to USD without ETH price - skip
                         return 0;
                     }
-                    calculatedUsdPrice = nativePrice * ethPrice;
+                    calculatedUsdPrice = nativePriceToUsd(nativePrice, ethPrice, tokenDecimals);
                 }
 
                 // Sanity check - if price seems unreasonable, skip it
@@ -1769,7 +1832,7 @@
             return null;
         }
 
-        async function getTokenInfo(address) {
+        function getTokenInfo(address) {
             const addr = address.toLowerCase();
             const info = tokenInfoCache.get(addr) || KNOWN_TOKENS[addr] || { symbol: addr.slice(0, 6) + '...', decimals: 18 };
             const price = tokenPriceCache.get(addr)?.price || 0;
@@ -1826,6 +1889,31 @@
 
         // Minimum number of orders for a token to be displayed (adjustable via slider)
         let minOrdersToDisplay = 2;
+        // Minimum number of orders for an edge to be displayed (both directions combined)
+        let minOrdersPerEdge = 1;
+
+        // Check if a token should be visible (meets order filter AND has at least one visible edge)
+        function isTokenVisible(address) {
+            const tokenData = tokens.get(address);
+            if (!tokenData || tokenData.orders.length < minOrdersToDisplay) return false;
+            // If edge filter is active (> 1), check that token has at least one visible edge
+            if (minOrdersPerEdge > 1) {
+                for (const [key, edge] of edges) {
+                    if (edge.sellToken === address || edge.buyToken === address) {
+                        if (getEdgeTotalOrders(edge) >= minOrdersPerEdge) {
+                            // Also check that the OTHER token meets its order filter
+                            const otherAddr = edge.sellToken === address ? edge.buyToken : edge.sellToken;
+                            const otherData = tokens.get(otherAddr);
+                            if (otherData && otherData.orders.length >= minOrdersToDisplay) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false; // No visible edges found
+            }
+            return true;
+        }
 
         function updateMinOrdersFilter(value) {
             minOrdersToDisplay = parseInt(value);
@@ -1840,12 +1928,22 @@
             draw();
         }
 
+        function updateMinOrdersPerEdgeFilter(value) {
+            minOrdersPerEdge = parseInt(value);
+            document.getElementById('edge-filter-value').textContent = value;
+            // Recalculate positions since tokens may appear/disappear
+            if (layoutMode === 'poles') {
+                updateTokenPositions();
+            } else {
+                arrangeInCircle();
+            }
+            updateStats();
+            draw();
+        }
+
         function updateTokenPositions() {
-            // Filter tokens: only show tokens with at least minOrdersToDisplay orders
-            const tokenList = Array.from(tokens.keys()).filter(addr => {
-                const tokenData = tokens.get(addr);
-                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
-            });
+            // Filter tokens: only show tokens that pass all visibility filters
+            const tokenList = Array.from(tokens.keys()).filter(addr => isTokenVisible(addr));
             const count = tokenList.length;
             if (count === 0) return;
 
@@ -1931,11 +2029,8 @@
         function physicsStep() {
             if (!physicsEnabled) return;
 
-            // Only process tokens that meet the minimum order filter
-            const positions = Array.from(tokenPositions.entries()).filter(([addr]) => {
-                const tokenData = tokens.get(addr);
-                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
-            });
+            // Only process tokens that pass all visibility filters
+            const positions = Array.from(tokenPositions.entries()).filter(([addr]) => isTokenVisible(addr));
             const poles = getCategoryPoles();
 
             positions.forEach(([addr, pos]) => {
@@ -2141,8 +2236,8 @@
                     // Small delay to avoid rate limiting
                     await new Promise(r => setTimeout(r, 50));
                 }
-                // Update display after fetching token info
-                updateTokenList();
+                // Recalculate volumes with correct decimals and update display
+                recalculateVolumes();
             } catch (e) {
                 console.error('[tokenInfo] Background fetch error:', e);
             } finally {
@@ -2176,11 +2271,52 @@
                     // Small delay to avoid rate limiting
                     await new Promise(r => setTimeout(r, 100));
                 }
+                // Recalculate volumes now that we have updated prices
+                recalculateVolumes();
             } catch (e) {
                 console.error('[prices] Background fetch error:', e);
             } finally {
                 pricesFetchingInProgress = false;
             }
+        }
+
+        // Recalculate all USD volumes using latest prices and decimals
+        function recalculateVolumes() {
+            // Reset all volumes
+            tokens.forEach(tokenData => {
+                tokenData.totalSellVolume = 0;
+                tokenData.totalBuyVolume = 0;
+            });
+            edges.forEach(edge => {
+                edge.sellVolume = 0;
+                edge.buyVolume = 0;
+            });
+
+            // Recalculate from all orders
+            orders.forEach(order => {
+                const sellToken = order.sellToken.toLowerCase();
+                const buyToken = order.buyToken.toLowerCase();
+                const sellValue = calculateUSDValue(order.sellAmount, sellToken);
+                const buyValue = calculateUSDValue(order.buyAmount, buyToken);
+                const cappedBuyValue = (sellValue > 0 && buyValue > sellValue * 10)
+                    ? sellValue : buyValue;
+
+                const sellTokenData = tokens.get(sellToken);
+                if (sellTokenData) sellTokenData.totalSellVolume += sellValue;
+                const buyTokenData = tokens.get(buyToken);
+                if (buyTokenData) buyTokenData.totalBuyVolume += cappedBuyValue;
+
+                const edgeKey = `${sellToken}-${buyToken}`;
+                const edge = edges.get(edgeKey);
+                if (edge) {
+                    edge.sellVolume += sellValue;
+                    edge.buyVolume += cappedBuyValue;
+                }
+            });
+
+            updateStats();
+            updateTokenList();
+            draw();
         }
 
         // Full rebuild (used on network change)
@@ -2201,14 +2337,30 @@
             document.getElementById('order-count').textContent = orders.size;
             document.getElementById('cached-count').textContent = orderDetailsCache.size;
 
-            // Show filtered token count (tokens with >= minOrdersToDisplay orders)
+            // Show filtered token count (tokens visible after all filters)
             const totalTokens = tokens.size;
-            const displayedTokens = Array.from(tokens.values()).filter(t => t.orders.length >= minOrdersToDisplay).length;
+            const displayedTokens = Array.from(tokens.keys()).filter(addr => isTokenVisible(addr)).length;
             document.getElementById('token-count').textContent = displayedTokens;
 
             // Update filter stats
             document.getElementById('filtered-tokens').textContent = displayedTokens;
             document.getElementById('total-tokens').textContent = totalTokens;
+
+            // Count unique edge pairs (A-B and B-A are the same visual edge)
+            const seenPairs = new Set();
+            let totalEdgePairs = 0;
+            let displayedEdgePairs = 0;
+            edges.forEach((edge, key) => {
+                const pairKey = [edge.sellToken, edge.buyToken].sort().join('-');
+                if (seenPairs.has(pairKey)) return;
+                seenPairs.add(pairKey);
+                totalEdgePairs++;
+                if (getEdgeTotalOrders(edge) >= minOrdersPerEdge) {
+                    displayedEdgePairs++;
+                }
+            });
+            document.getElementById('filtered-edges').textContent = displayedEdgePairs;
+            document.getElementById('total-edges').textContent = totalEdgePairs;
 
             let totalVolume = 0;
             tokens.forEach(t => totalVolume += t.totalSellVolume);
@@ -2251,6 +2403,9 @@
 
         function draw() {
             ctx.clearRect(0, 0, width, height);
+            ctx.save();
+            ctx.translate(camX, camY);
+            ctx.scale(camScale, camScale);
 
             // Draw poles and category labels (only in poles mode)
             if (layoutMode === 'poles') {
@@ -2264,6 +2419,8 @@
 
             // Draw tokens
             drawTokens();
+
+            ctx.restore();
         }
 
         function drawCircleLayout() {
@@ -2275,10 +2432,7 @@
             ctx.stroke();
 
             // Draw category arc indicators - use filtered token list
-            const tokenList = Array.from(tokens.keys()).filter(addr => {
-                const tokenData = tokens.get(addr);
-                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
-            });
+            const tokenList = Array.from(tokens.keys()).filter(addr => isTokenVisible(addr));
             const categoryTokens = { stable: [], eth: [], other: [] };
             tokenList.forEach(addr => {
                 const cat = getTokenCategory(addr);
@@ -2403,11 +2557,16 @@
                 if (!sellTokenData || sellTokenData.orders.length < minOrdersToDisplay) return;
                 if (!buyTokenData || buyTokenData.orders.length < minOrdersToDisplay) return;
 
+                // Skip edges that don't meet minimum orders per edge filter (both directions combined)
+                const totalEdgeOrders = getEdgeTotalOrders(edge);
+                if (totalEdgeOrders < minOrdersPerEdge) return;
+
                 const fromPos = tokenPositions.get(edge.sellToken);
                 const toPos = tokenPositions.get(edge.buyToken);
                 if (!fromPos || !toPos) return;
 
-                const isHovered = hoveredEdge === key;
+                const reverseKey = `${edge.buyToken}-${edge.sellToken}`;
+                const isHovered = hoveredEdge === key || hoveredEdge === reverseKey;
                 const maxWidth = 20;
                 const minWidth = 1;
 
@@ -2489,13 +2648,12 @@
             }
         }
 
-        async function drawTokens() {
+        function drawTokens() {
             for (const [address, pos] of tokenPositions) {
-                // Skip tokens that don't meet minimum order filter
-                const tokenData = tokens.get(address);
-                if (!tokenData || tokenData.orders.length < minOrdersToDisplay) continue;
+                // Skip tokens that aren't visible (order filter + edge connectivity)
+                if (!isTokenVisible(address)) continue;
 
-                const tokenInfo = await getTokenInfo(address);
+                const tokenInfo = getTokenInfo(address);
                 const size = pos.size || 15;
 
                 const isHovered = hoveredToken === address;
@@ -2549,7 +2707,7 @@
             }
         }
 
-        // Find token at position
+        // Find token at position (world coords)
         function findTokenAt(x, y) {
             for (const [address, pos] of tokenPositions) {
                 const size = pos.size || 15;
@@ -2580,6 +2738,8 @@
         // Find edge at position
         function findEdgeAt(x, y) {
             for (const [key, edge] of edges) {
+                // Skip filtered-out edges
+                if (getEdgeTotalOrders(edge) < minOrdersPerEdge) continue;
                 const fromPos = tokenPositions.get(edge.sellToken);
                 const toPos = tokenPositions.get(edge.buyToken);
                 if (!fromPos || !toPos) continue;
@@ -2594,27 +2754,38 @@
 
         function handleMouseDown(e) {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-
-            // Check if clicking on a pole first (poles are underneath tokens)
-            const poleCategory = findPoleAt(x, y);
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const {x, y} = screenToWorld(sx, sy);
 
             // Check if clicking on a token
             const tokenAddr = findTokenAt(x, y);
+            // Check if clicking on a pole
+            const poleCategory = findPoleAt(x, y);
+
+            didDragOrPan = false;
 
             if (tokenAddr) {
                 draggedToken = tokenAddr;
                 draggedPole = null;
+                isPanning = false;
                 isDragging = true;
                 canvas.classList.add('dragging');
                 hideTooltip();
             } else if (poleCategory) {
                 draggedPole = poleCategory;
                 draggedToken = null;
+                isPanning = false;
                 isDragging = true;
                 canvas.classList.add('dragging');
                 hideTooltip();
+            } else {
+                // Start panning
+                isPanning = true;
+                isDragging = true;
+                panStartX = sx;
+                panStartY = sy;
+                canvas.style.cursor = 'grabbing';
             }
         }
 
@@ -2622,29 +2793,40 @@
             if (isDragging) {
                 draggedToken = null;
                 draggedPole = null;
+                isPanning = false;
                 isDragging = false;
                 canvas.classList.remove('dragging');
+                canvas.style.cursor = 'default';
             }
         }
 
         function handleMouseMove(e) {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const {x, y} = screenToWorld(sx, sy);
 
-            // Handle dragging a pole
+            // Handle panning
+            if (isDragging && isPanning) {
+                const dx = sx - panStartX;
+                const dy = sy - panStartY;
+                if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragOrPan = true;
+                camX += dx;
+                camY += dy;
+                panStartX = sx;
+                panStartY = sy;
+                return;
+            }
+
+            // Handle dragging a pole (in world coords)
             if (isDragging && draggedPole) {
+                didDragOrPan = true;
                 const poles = getCategoryPoles();
                 if (poles[draggedPole]) {
-                    // Calculate how much the pole moved
                     const dx = x - poles[draggedPole].x;
                     const dy = y - poles[draggedPole].y;
-
-                    // Move the pole
                     poles[draggedPole].x = x;
                     poles[draggedPole].y = y;
-
-                    // Move all tokens in this category with the pole
                     for (const [addr, pos] of tokenPositions) {
                         const category = getTokenCategory(addr);
                         if (category === draggedPole) {
@@ -2655,19 +2837,18 @@
                         }
                     }
                 }
-                return; // Don't do hover detection while dragging
+                return;
             }
 
-            // Handle dragging a token
+            // Handle dragging a token (in world coords)
             if (isDragging && draggedToken) {
+                didDragOrPan = true;
                 const pos = tokenPositions.get(draggedToken);
                 if (pos) {
                     pos.x = x;
                     pos.y = y;
                     pos.vx = 0;
                     pos.vy = 0;
-
-                    // Find nearest pole and update association
                     const poles = getCategoryPoles();
                     let nearestPole = null;
                     let nearestDist = Infinity;
@@ -2683,15 +2864,15 @@
                     if (nearestPolePos) {
                         pos.poleX = nearestPolePos.x;
                         pos.poleY = nearestPolePos.y;
-                        pos.orbitRadius = nearestDist; // Set orbit to current distance
+                        pos.orbitRadius = nearestDist;
                     }
                 }
-                return; // Don't do hover detection while dragging
+                return;
             }
 
             let found = false;
 
-            // Check tokens first
+            // Check tokens first (world coords)
             for (const [address, pos] of tokenPositions) {
                 const size = pos.size || 15;
                 const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
@@ -2711,7 +2892,6 @@
                 if (poleCategory) {
                     canvas.style.cursor = 'grab';
                     found = true;
-                    // Could show pole tooltip here
                 }
             }
 
@@ -2720,6 +2900,7 @@
                 hoveredToken = null;
                 canvas.style.cursor = 'default';
                 for (const [key, edge] of edges) {
+                    if (getEdgeTotalOrders(edge) < minOrdersPerEdge) continue;
                     const fromPos = tokenPositions.get(edge.sellToken);
                     const toPos = tokenPositions.get(edge.buyToken);
                     if (!fromPos || !toPos) continue;
@@ -2811,24 +2992,41 @@
             tooltip.style.display = 'block';
         }
 
+        function getEdgeTotalOrders(edge) {
+            const reverseKey = `${edge.buyToken}-${edge.sellToken}`;
+            const reverseEdge = edges.get(reverseKey);
+            return edge.orders.length + (reverseEdge ? reverseEdge.orders.length : 0);
+        }
+
         async function showEdgeTooltip(e, edge) {
             const tooltip = document.getElementById('tooltip');
             const sellInfo = await getTokenInfo(edge.sellToken);
             const buyInfo = await getTokenInfo(edge.buyToken);
 
+            // Look up reverse edge for total counts
+            const reverseKey = `${edge.buyToken}-${edge.sellToken}`;
+            const reverseEdge = edges.get(reverseKey);
+            const totalOrders = edge.orders.length + (reverseEdge ? reverseEdge.orders.length : 0);
+            const totalSellVolume = edge.sellVolume + (reverseEdge ? reverseEdge.sellVolume : 0);
+            const totalBuyVolume = edge.buyVolume + (reverseEdge ? reverseEdge.buyVolume : 0);
+
             tooltip.innerHTML = `
-                <div class="tooltip-title">${sellInfo.symbol} → ${buyInfo.symbol}</div>
+                <div class="tooltip-title">${sellInfo.symbol} ↔ ${buyInfo.symbol}</div>
                 <div class="tooltip-row">
-                    <span class="tooltip-label">Sell Volume:</span>
-                    <span class="tooltip-value">$${edge.sellVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                    <span class="tooltip-label">Total Orders:</span>
+                    <span class="tooltip-value">${totalOrders}</span>
                 </div>
                 <div class="tooltip-row">
-                    <span class="tooltip-label">Buy Volume:</span>
-                    <span class="tooltip-value">$${edge.buyVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                    <span class="tooltip-label">${sellInfo.symbol} → ${buyInfo.symbol}:</span>
+                    <span class="tooltip-value">${edge.orders.length} orders</span>
                 </div>
+                ${reverseEdge ? `<div class="tooltip-row">
+                    <span class="tooltip-label">${buyInfo.symbol} → ${sellInfo.symbol}:</span>
+                    <span class="tooltip-value">${reverseEdge.orders.length} orders</span>
+                </div>` : ''}
                 <div class="tooltip-row">
-                    <span class="tooltip-label">Orders:</span>
-                    <span class="tooltip-value">${edge.orders.length}</span>
+                    <span class="tooltip-label">Total Volume:</span>
+                    <span class="tooltip-value">$${(totalSellVolume + totalBuyVolume).toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
                 </div>
             `;
 
@@ -2870,40 +3068,39 @@
             }
         }
 
-        // Save cache to localStorage (debounced)
-        let saveTimeout = null;
-        function saveOrderCache() {
-            if (saveTimeout) clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-                try {
-                    const entries = Array.from(orderDetailsCache.entries());
-                    localStorage.setItem('cowOrderCache', JSON.stringify(entries));
-                    console.log(`[cache] Saved ${entries.length} orders to localStorage`);
-                } catch (e) {
-                    console.error('[cache] Failed to save cache:', e);
-                    // If storage is full, clear old entries
-                    if (e.name === 'QuotaExceededError') {
-                        localStorage.removeItem('cowOrderCache');
-                    }
+        // Save cache to localStorage
+        // Uses a dirty flag + periodic flush to avoid excessive writes
+        // but still saves reliably before page unload
+        let orderCacheDirty = false;
+
+        function saveOrderCacheNow() {
+            if (!orderCacheDirty) return;
+            try {
+                const entries = Array.from(orderDetailsCache.entries());
+                localStorage.setItem('cowOrderCache', JSON.stringify(entries));
+                orderCacheDirty = false;
+                console.log(`[cache] Saved ${entries.length} orders to localStorage`);
+            } catch (e) {
+                console.error('[cache] Failed to save cache:', e);
+                if (e.name === 'QuotaExceededError') {
+                    localStorage.removeItem('cowOrderCache');
                 }
-            }, 2000); // Save 2 seconds after last update
+            }
+        }
+
+        function saveOrderCache() {
+            orderCacheDirty = true;
         }
 
         // Load cache on startup
         loadOrderCache();
 
-        // Save cache immediately when page is about to close (don't rely on debounce)
-        window.addEventListener('beforeunload', () => {
-            if (orderDetailsCache.size > 0) {
-                try {
-                    const entries = Array.from(orderDetailsCache.entries());
-                    localStorage.setItem('cowOrderCache', JSON.stringify(entries));
-                    console.log(`[cache] Saved ${entries.length} orders on page unload`);
-                } catch (e) {
-                    // Ignore errors on unload
-                }
-            }
-        });
+        // Periodically flush dirty cache every 5 seconds
+        setInterval(saveOrderCacheNow, 5000);
+
+        // Also save immediately on page unload (belt and suspenders)
+        window.addEventListener('beforeunload', saveOrderCacheNow);
+        window.addEventListener('pagehide', saveOrderCacheNow);
 
         // Fetch orders from the auction list
         async function fetchOrders() {
@@ -3046,6 +3243,10 @@
         }
 
         function resetView() {
+            // Reset camera
+            camX = 0;
+            camY = 0;
+            camScale = 1;
             // Reset poles to default positions
             polePositions = null;
             initializePoles();
@@ -3070,11 +3271,8 @@
         }
 
         function arrangeInCircle() {
-            // Filter tokens: only show tokens with at least minOrdersToDisplay orders
-            const tokenList = Array.from(tokens.keys()).filter(addr => {
-                const tokenData = tokens.get(addr);
-                return tokenData && tokenData.orders.length >= minOrdersToDisplay;
-            });
+            // Filter tokens: only show tokens that pass all visibility filters
+            const tokenList = Array.from(tokens.keys()).filter(addr => isTokenVisible(addr));
             const count = tokenList.length;
             if (count === 0) return;
 
@@ -3197,11 +3395,12 @@
         // Handle canvas click for edge selection
         function handleCanvasClick(e) {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const {x, y} = screenToWorld(sx, sy);
 
-            // Don't trigger if we were dragging
-            if (isDragging) return;
+            // Don't trigger if we were dragging/panning
+            if (didDragOrPan) return;
 
             // Check if clicking on a token (don't show order panel)
             const tokenAddr = findTokenAt(x, y);
@@ -4080,18 +4279,40 @@
             return price.toExponential(2);
         }
 
+        // Zoom with scroll wheel (zoom towards mouse position)
+        function handleWheel(e) {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+
+            // Zoom factor per scroll tick
+            const zoomSpeed = 0.1;
+            const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+            const newScale = Math.max(0.1, Math.min(10, camScale * (1 + delta)));
+
+            // Zoom towards mouse position
+            const scaleRatio = newScale / camScale;
+            camX = sx - (sx - camX) * scaleRatio;
+            camY = sy - (sy - camY) * scaleRatio;
+            camScale = newScale;
+        }
+
         // Initialize
         window.addEventListener('resize', resizeCanvas);
         canvas.addEventListener('mousedown', handleMouseDown);
         canvas.addEventListener('mouseup', handleMouseUp);
         canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('wheel', handleWheel, { passive: false });
         canvas.addEventListener('click', handleCanvasClick);
         canvas.addEventListener('mouseleave', () => {
             if (isDragging) {
                 draggedToken = null;
                 draggedPole = null;
+                isPanning = false;
                 isDragging = false;
                 canvas.classList.remove('dragging');
+                canvas.style.cursor = 'default';
             }
             hoveredToken = null;
             hoveredEdge = null;
