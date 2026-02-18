@@ -869,8 +869,48 @@
         };
 
         // Dynamic token info cache (fetched from API)
+        // Persisted to localStorage for faster startup
         let tokenInfoCache = new Map();
         let tokenPriceCache = new Map();
+
+        // Load token info cache from localStorage
+        function loadTokenInfoCache() {
+            try {
+                const cached = localStorage.getItem('cowTokenInfoCache');
+                if (cached) {
+                    const entries = JSON.parse(cached);
+                    for (const [addr, info] of entries) {
+                        tokenInfoCache.set(addr, info);
+                    }
+                    console.log(`[cache] Loaded ${tokenInfoCache.size} token infos from localStorage`);
+                }
+            } catch (e) {
+                console.error('[cache] Failed to load token info cache:', e);
+            }
+        }
+
+        // Save token info cache to localStorage (debounced)
+        let tokenInfoSaveTimeout = null;
+        function saveTokenInfoCache() {
+            if (tokenInfoSaveTimeout) clearTimeout(tokenInfoSaveTimeout);
+            tokenInfoSaveTimeout = setTimeout(() => {
+                try {
+                    // Only save entries that have real symbols (not placeholders)
+                    const entries = Array.from(tokenInfoCache.entries())
+                        .filter(([addr, info]) => info.symbol && !info.symbol.endsWith('...'));
+                    localStorage.setItem('cowTokenInfoCache', JSON.stringify(entries));
+                    console.log(`[cache] Saved ${entries.length} token infos to localStorage`);
+                } catch (e) {
+                    console.error('[cache] Failed to save token info cache:', e);
+                    if (e.name === 'QuotaExceededError') {
+                        localStorage.removeItem('cowTokenInfoCache');
+                    }
+                }
+            }, 2000);
+        }
+
+        // Load token info cache on startup
+        loadTokenInfoCache();
 
         // Canvas setup
         const canvas = document.getElementById('canvas');
@@ -1262,11 +1302,12 @@
             if (rpcInfo && rpcInfo.symbol) {
                 const info = { symbol: rpcInfo.symbol, decimals: rpcInfo.decimals };
                 tokenInfoCache.set(addr, info);
+                saveTokenInfoCache(); // Persist to localStorage
                 console.log(`✓ Token ${addr.slice(0,10)}... = ${rpcInfo.symbol}`);
                 return info;
             }
 
-            // Fallback to abbreviated address
+            // Fallback to abbreviated address (don't cache to localStorage - it's a placeholder)
             console.warn(`✗ Could not resolve token ${addr.slice(0,10)}...`);
             const info = { symbol: addr.slice(0, 8) + '...', decimals: 18 };
             tokenInfoCache.set(addr, info);
@@ -1844,13 +1885,23 @@
 
             console.log(`[processNewOrders] ${orderList.length} new orders, ${unknownTokens.length} unknown tokens`);
 
-            // Fetch unknown token symbols from RPC (batch of 5 at a time) - this is fast
-            for (let i = 0; i < unknownTokens.length; i += 5) {
-                const batch = unknownTokens.slice(i, i + 5);
-                await Promise.all(batch.map(addr => fetchTokenInfo(addr, network)));
+            // DON'T block on token info - fetch in background
+            // Use abbreviated address as fallback symbol for now
+            if (unknownTokens.length > 0) {
+                // Set placeholder info immediately so display works
+                for (const addr of unknownTokens) {
+                    if (!tokenInfoCache.has(addr)) {
+                        tokenInfoCache.set(addr, {
+                            symbol: addr.slice(0, 6) + '...',
+                            decimals: 18
+                        });
+                    }
+                }
+                // Fetch real info in background (non-blocking)
+                fetchTokenInfoInBackground(unknownTokens, network);
             }
 
-            // Add orders to data structure FIRST (don't wait for prices)
+            // Add orders to data structure IMMEDIATELY (don't wait for anything)
             // This allows the visualization to appear immediately
             orderList.forEach(order => {
                 const sellToken = order.sellToken.toLowerCase();
@@ -1908,6 +1959,40 @@
             // Fetch prices in background (don't block visualization)
             // Use CoW API native_price which doesn't have CORS issues
             fetchPricesInBackground(Array.from(newTokens), network);
+        }
+
+        // Fetch token info in background without blocking UI
+        let tokenInfoFetchingInProgress = false;
+        async function fetchTokenInfoInBackground(tokenAddresses, network) {
+            if (tokenInfoFetchingInProgress) return;
+            tokenInfoFetchingInProgress = true;
+
+            try {
+                for (const addr of tokenAddresses) {
+                    // Skip if we already have real info (not placeholder)
+                    const cached = tokenInfoCache.get(addr);
+                    if (cached && !cached.symbol.endsWith('...')) continue;
+
+                    // Try to fetch real info
+                    const info = await fetchTokenInfoFromRPC(addr, network);
+                    if (info && info.symbol) {
+                        tokenInfoCache.set(addr, {
+                            symbol: info.symbol,
+                            decimals: info.decimals || 18
+                        });
+                        saveTokenInfoCache(); // Persist to localStorage
+                    }
+
+                    // Small delay to avoid rate limiting
+                    await new Promise(r => setTimeout(r, 50));
+                }
+                // Update display after fetching token info
+                updateTokenList();
+            } catch (e) {
+                console.error('[tokenInfo] Background fetch error:', e);
+            } finally {
+                tokenInfoFetchingInProgress = false;
+            }
         }
 
         // Fetch prices in background without blocking UI
