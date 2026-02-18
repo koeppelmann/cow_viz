@@ -505,6 +505,10 @@
                 <div class="stat-label">Orders</div>
             </div>
             <div class="stat">
+                <div class="stat-value" id="cached-count">0</div>
+                <div class="stat-label">Cached</div>
+            </div>
+            <div class="stat">
                 <div class="stat-value" id="total-volume">$0</div>
                 <div class="stat-label">Volume</div>
             </div>
@@ -1881,6 +1885,7 @@
 
         function updateStats() {
             document.getElementById('order-count').textContent = orders.size;
+            document.getElementById('cached-count').textContent = orderDetailsCache.size;
 
             // Show filtered token count (tokens with >= minOrdersToDisplay orders)
             const totalTokens = tokens.size;
